@@ -1,0 +1,7 @@
+results/*
+!results/.gitkeep
+*.asv
+*.mex*
+
+# Machine-specific dependency inspection record
+/docs/dependencies.local.md

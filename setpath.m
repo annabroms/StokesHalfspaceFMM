@@ -1,0 +1,13 @@
+%SETPATH Add this repository and the selected external FMM3D installation.
+% Run from this folder with setpath, or use run('/absolute/path/setpath.m').
+blake_repo_root = fileparts(mfilename('fullpath'));
+addpath(blake_repo_root, ...
+    fullfile(blake_repo_root,'matlab'), ...
+    fullfile(blake_repo_root,'examples'), ...
+    fullfile(blake_repo_root,'benchmarks'), ...
+    fullfile(blake_repo_root,'tests'));
+
+% Select only the FMM3D checkout, never its sibling FMM3D_basic installation.
+blake_fmm_directory = fullfile(fileparts(blake_repo_root),'FMM3D','FMM3D','matlab');
+blake.setup(blake_fmm_directory);
+clear blake_repo_root blake_fmm_directory;
