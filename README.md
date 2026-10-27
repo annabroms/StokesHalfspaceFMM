@@ -110,6 +110,15 @@ The adapter uses the same installed FMM3D binary, without a new MEX or external
 library edits. `info.stokes_backend` records the effective choice. The separate
 harmonic correction and all physical conventions are preserved.
 
+## Wall rotlets, potential dipoles and stresslets
+
+`blake.rotlet`, `blake.potential_dipole` and `blake.stresslet` provide complete
+wall-corrected velocity with blocked direct application. They preserve the
+component-first layout, physical units, viscosity and wall-height conventions.
+The stresslet uses an oriented double force with prescribed unit source normals;
+each family has three linear strength coefficients per source. See
+[definitions, derivations, references and self-tests](docs/singularities.md).
+
 ## Pressure, gradients and traction
 
 ```matlab
@@ -225,7 +234,7 @@ the correctness suite.
 
 ## Limitations
 
-- Horizontal walls and point-force singularities only; no regularized forces,
+- Horizontal walls and point singularities only; no regularized forces,
   periodic boundaries, finite walls or MFS solvers.
 - The FMM adapter rejects targets within 64*eps*L of physical **or reflected**
   sources, conservatively above the backend exclusion threshold. This guard is

@@ -215,3 +215,23 @@ function require_fmm(test)
 assumeTrue(test,exist('stfmm3d','file')==2 && exist('lfmm3d','file')==2 ...
     && exist('fmm3d','file')==3,'FMM3D unavailable: run blake.setup.');
 end
+
+function testWallSingularityFamilies(test)
+% Run every new no-argument unit and verify public dispatch and RNG preservation.
+state=rng;
+blake.rotlet(); blake.potential_dipole(); blake.stresslet();
+blake.internal.singularities(); blake.internal.singularity_test();
+verifyEqual(test,rng,state);
+y=[0;0;1]; x=[0.3;0.4;0.7]; f=[1;-2;3];
+for entry={'rotlet','potential_dipole','stresslet'}
+    name=entry{1}; kind=strrep(name,'_','-'); o=struct('mu',2);
+    if strcmp(name,'stresslet'), o.normals=[0;0;1]; end
+    public=str2func(['blake.' name]);
+    u=public(y,f,x,o); v=blake.internal.singularities(kind,y,f,x,o);
+    verifyEqual(test,u,v);
+    o.method='fmm';
+    verifyError(test,@() public(y,f,x,o),'blake:UnsupportedBackend');
+end
+verifyError(test,@() blake.stresslet(y,f,x,struct('normals',[0;0;2])), ...
+    'blake:InvalidNormals');
+end
