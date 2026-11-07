@@ -99,7 +99,7 @@ for backend={'auto','upstream','laplace-velocity'}
     verifyGreaterThanOrEqual(test,info.total_seconds,sum([info.geometry_seconds ...
         info.guard_seconds info.strength_seconds info.assembly_seconds info.fmm_evaluation_seconds]));
     verifyFalse(test,info.guard_reused); verifyEqual(test,info.timing_schema_version,2);
-    if strcmp(backend{1},'upstream')
+    if ~strcmp(backend{1},'laplace-velocity')
         verifyEqual(test,info.stokes_backend,'upstream');
         verifyFalse(test,info.stokes_error_flag_exposed);
     else
@@ -110,17 +110,19 @@ end
 end
 
 function testDefaultBackendSelection(test)
-% Public calls without a backend option select Laplace only for velocity.
+% Public calls select the updated STFMM3D path, including velocity-only calls.
 require_fmm(test);
+manifest=blake.internal.fmm.manifest();
+verifyEqual(test,manifest.velocity_default_backend,'upstream');
 s=[0;0;1]; f=[1;2;3]; x=[0.2;0.3;0.4];
 [u,info]=blake.velocity(s,f,x);
-verifyEqual(test,info.stokes_backend,'laplace-velocity');
+verifyEqual(test,info.stokes_backend,'upstream');
 [a,info]=blake.fields(s,f,x);
-verifyEqual(test,info.stokes_backend,'laplace-velocity');
+verifyEqual(test,info.stokes_backend,'upstream');
 verifyEqual(test,a.velocity,u);
 [geom,~]=blake.prepare(s,x,0);
 [prepared,info]=blake.apply(geom,f);
-verifyEqual(test,info.stokes_backend,'laplace-velocity');
+verifyEqual(test,info.stokes_backend,'upstream');
 verifyEqual(test,prepared,u);
 o=struct('requested',{{'velocity','pressure','gradient','traction'}},'normals',[0;0;1]);
 [~,info]=blake.fields(s,f,x,o);

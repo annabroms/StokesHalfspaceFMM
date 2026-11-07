@@ -16,9 +16,17 @@ with this repository.
 
 From the repository root, run `setpath`. The supplied script adds this
 repository's public MATLAB interfaces, examples, benchmarks and tests, and
-expects the external FMM3D MATLAB directory at `../FMM3D/FMM3D/matlab`.
+looks for a sibling checkout at `../FMM3D/matlab` or `../FMM3D/FMM3D/matlab`,
+relative to this repository's location. No username or home-directory path is
+required. Set `FMM3D_MATLAB` to select another installation for all no-argument
+setup calls:
 
-For a different installation layout, use:
+```matlab
+setenv('FMM3D_MATLAB', '/path/to/FMM3D/matlab');
+setpath;
+```
+
+To select an installation explicitly for a setup call, use:
 
 ```matlab
 addpath('matlab');
@@ -29,12 +37,17 @@ Select one compiled FMM3D installation explicitly. The Stokes wrapper, Laplace
 wrapper and MEX binary must resolve to the same directory. Avoid recursively
 adding directories containing several FMM3D installations.
 
-Default velocity evaluation uses four batched Laplace charge potentials and
-target gradients for Stokeslets, plus separate Laplace charge/dipole potentials
-and gradients for the half-space correction. The optional `upstream` backend
-uses Stokes target velocities instead. The optional pressure, velocity-gradient and
-traction interfaces additionally use Stokes pressure/gradients and Laplace
-target Hessians. These capabilities were verified in the tested installation.
+Default velocity evaluation calls the updated `stfmm3d` with source flag 0
+and target flag 1. Its internal four-potential Laplace call uses flags `(0,2)`:
+no source fields or Hessians. The separate harmonic correction uses Laplace
+flags `(0,2)` as well. Pressure requests also avoid Hessians; velocity-gradient
+and traction requests require them. The optional `laplace-velocity` backend is
+retained only as an explicitly selected MATLAB reference for comparisons.
+
+Rebuild the updated FMM3D MATLAB interface with `make matlab` from its own
+checkout, then run `clear fmm3d` before `setpath` here. The setup path selects
+`../FMM3D/FMM3D/matlab`, never the sibling `FMM3D_basic` installation. No
+standalone `stfmm3d_laplace` wrapper is required.
 
 ## Tested system
 
@@ -69,18 +82,19 @@ and [formula conventions](formulas.md) for the numerical details.
 
 ## Velocity backend optimization
 
-The installed Stokes source driver requests internal Laplace source and target
-Hessians even for a public target-velocity-only request. The new MATLAB adapter
-bypasses that path using the same external binary's four-density Laplace call
-with source flag 0 and target flag 2. This removes unnecessary derivative and
-source-field work without editing or rebuilding FMM3D. It is an algorithmic work
-reduction; no measured speedup is claimed until a new timing comparison is run.
+The updated external Stokes driver selects internal Laplace derivative flags
+from the requested Stokes outputs. The default `auto` backend now resolves to
+`upstream`, using that driver for velocities as well as derivative requests.
+The older MATLAB four-potential adapter remains available explicitly as
+`laplace-velocity` for the standalone comparison benchmark. It is no longer
+needed to avoid unnecessary Hessians in normal velocity evaluation.
 
-The adapter exposes and checks Laplace ier for the Stokes velocity calculation.
-The `stokes_error_flag_exposed` field is true for `laplace-velocity` and false
-for the upstream path. Pressure and target derivatives retain the upstream
-limitation. Manifests list available backends; evaluation/sample records name
-which backend actually ran. Dependency source and binary provenance are unchanged.
+The `stokes_error_flag_exposed` field is false for the default Stokes wrapper
+and true for the legacy `laplace-velocity` adapter. Manifests identify the
+resolved wrappers, binary checksum and default backend; evaluation records
+name the backend actually used. The historical tested-system table above
+records the earlier validation environment, not a fingerprint of a newly
+rebuilt MEX binary.
 
 Prepared geometry caches a version-1 proximity assessment, not FMM data. Missing,
 unchecked or differently versioned assessments are recomputed before evaluation.

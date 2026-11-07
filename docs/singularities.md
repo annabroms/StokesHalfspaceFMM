@@ -226,7 +226,7 @@ Direct arithmetic has no requested approximation tolerance (the inherited
 `tol=1e-9` option is unused). Runs used MATLAB R2025a
 `25.1.0.2943329`, Linux x86-64, `OMP_NUM_THREADS=1`; MATLAB reported
 `maxNumCompThreads=8`. FMM-dependent existing tests used the installation at
-`/home/anna/Dokument/FMM3D/FMM3D/matlab`, source revision
+`FMM3D/matlab`, source revision
 `c89238cfaf32e4c3eff4192065462b8ec968ed51`, MEX SHA-256
 `c6fd530d68482b2eff6ecdbb509affd7cb5689cffd2782b0dd1d2518053eaba9`.
 This provenance was queried from the active installation and supersedes older

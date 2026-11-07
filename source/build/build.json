@@ -1,0 +1,12 @@
+{
+  "archive": "/home/anna/Dokument/FMM3D/FMM3D/lib-static/libfmm3d.a",
+  "archive_sha256": "d12369e678370951e7d260f597ede596cb6fbb3e60b997470181fa1034a0ba43",
+  "fortran_sha256": "16d97252c7d35faca0acccb7068e887986686369bdc8c2ac0ead1bdfa1b50603",
+  "gateway_sha256": "9181b81d5548f98cbd285fd965f76a42189ad0f82bdda719da556dd9780898c6",
+  "mex_path": "/home/anna/Dokument/StokesHalfspaceFMM/matlab/+blake/+internal/+fmm/blake_onecall_mex.mexa64",
+  "mex_sha256": "8b1a0526e4a9e366c466117d13a9de059762ae183370f947dd6a8c4fd328bc40",
+  "fmm_source_revision": "1e73a3b595589bff25a7ab711f14af44870261c7",
+  "matlab": "25.1.0.2943329 (R2025a)",
+  "compiler_flags": "gfortran -O3 -fPIC -fopenmp",
+  "compiler": "GNU Fortran (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0\nCopyright (C) 2021 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
+}

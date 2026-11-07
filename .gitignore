@@ -5,3 +5,6 @@ results/*
 
 # Machine-specific dependency inspection record
 /docs/dependencies.local.md
+
+# Local native objects and exact build provenance
+/native/build/

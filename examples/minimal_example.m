@@ -1,7 +1,8 @@
 % A horizontal no-slip wall; separate source and target arrays, in physical units.
 root=fileparts(fileparts(mfilename('fullpath')));
 addpath(fullfile(root,'matlab'));
-blake.setup('/home/anna/Dokument/FMM3D/FMM3D/matlab');
+% Select another installation with FMM3D_MATLAB or an explicit blake.setup argument.
+blake.setup;
 sources=[0 0.5;0 0.2;1 0.7];
 forces=[1 -0.3;0 0.4;0.2 1];
 targets=[0.1 0.4 0.7;0.2 0.3 0.1;0 0.5 1.2];

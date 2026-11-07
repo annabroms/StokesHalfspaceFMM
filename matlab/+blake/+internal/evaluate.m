@@ -10,12 +10,16 @@ validateattributes(forces,{'double'},{'real','finite','nonsparse','2d','nrows',3
 if strcmp(opts.method,'fmm') && order>1 && strcmp(opts.stokes_backend,'laplace-velocity')
     error('blake:UnsupportedBackend','laplace-velocity supports velocity only; use auto or upstream.');
 end
+if strcmp(opts.method,'fmm') && strcmp(opts.fmm_backend,'one-call') && order>2
+    error('blake:UnsupportedBackend','one-call supports velocity and pressure, not gradients or traction.');
+end
 info=struct('method',opts.method,'requested_tolerance',opts.tol, ...
     'ns',geom.ns,'nt',geom.nt,'geometry_seconds',0,'strength_seconds',0, ...
     'guard_seconds',0,'stokes_seconds',0,'laplace_seconds',0, ...
     'direct_seconds',0,'assembly_seconds',0,'diagnostics_seconds',0, ...
     'stokes_error_flag_exposed',false,'tree_reused',false, ...
-    'guard_reused',false,'stokes_backend','none');
+    'guard_reused',false,'stokes_backend','none','fmm_backend',opts.fmm_backend, ...
+    'fmm_call_count',0,'laplace_source_flag',0,'laplace_target_flag',0);
 if geom.ns==0 || geom.nt==0
     fields=struct('velocity',zeros(3,geom.nt));
     if order>=2, fields.pressure=zeros(1,geom.nt); end
@@ -28,6 +32,18 @@ info.strength_seconds=toc(t);
 if strcmp(opts.method,'blake')
     t=tic; fields=blake.internal.direct.blake_apply(geom,forces,opts,order);
     info.direct_seconds=toc(t);
+elseif strcmp(opts.method,'fmm') && strcmp(opts.fmm_backend,'one-call')
+    [fields,timing]=blake.internal.fmm.onecall(geom,data,opts.tol,opts.mu,order);
+    info.guard_seconds=timing.guard_seconds;
+    info.guard_reused=timing.guard_reused;
+    info.stokes_backend=timing.stokes_backend;
+    info.stokes_error_flag_exposed=timing.stokes_error_flag_exposed;
+    info.strength_seconds=info.strength_seconds+timing.strength_seconds;
+    info.assembly_seconds=timing.assembly_seconds;
+    info.laplace_seconds=timing.laplace_seconds;
+    info.fmm_call_count=timing.fmm_call_count;
+    info.laplace_source_flag=timing.laplace_source_flag;
+    info.laplace_target_flag=timing.laplace_target_flag;
 else
     if strcmp(opts.method,'fmm')
         [s,l,timing]=blake.internal.fmm.evaluate(geom,data,opts.tol,order,opts.stokes_backend);
@@ -39,6 +55,8 @@ else
         info.assembly_seconds=timing.assembly_seconds;
         info.stokes_seconds=timing.stokes_seconds;
         info.laplace_seconds=timing.laplace_seconds;
+        info.fmm_call_count=2;
+        info.laplace_target_flag=max(2,order);
     else
         t=tic;
         s=blake.internal.direct.stokes([geom.sources geom.images],data.stokes, ...

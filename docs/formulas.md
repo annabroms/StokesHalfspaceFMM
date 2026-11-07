@@ -105,7 +105,7 @@ with no source outputs requested through the MATLAB API.
 
 ## Target-only four-potential Stokes velocity
 
-The default velocity adapter evaluates the same free-space Stokeslet using
+The optional legacy MATLAB velocity adapter evaluates the same free-space Stokeslet using
 four scalar charge potentials through the existing compiled Laplace FMM. It
 also accepts arbitrary free-space sources, independent targets and signed forces
 without introducing a wall or reflected sources itself.
@@ -129,9 +129,11 @@ reshapes gradients to density-by-derivative-by-target (4-by-3-by-Nt), reconstruc
 velocity, and checks the exposed Laplace status. The harmonic correction remains
 a separate charge/dipole call.
 
-`stokes_backend='auto'` selects this adapter for velocity only. Pressure and
-gradient requests retain upstream `stfmm3d`; explicit `laplace-velocity` with
-such requests is rejected. No kernel normalization or physical conventions change.
+`stokes_backend='auto'` now selects the updated Fortran `stfmm3d`, including
+for velocity-only calls. Its internal Laplace call also uses flags `(0,2)` for
+velocity and pressure; only velocity gradients require Hessians. The MATLAB
+adapter remains an explicit `laplace-velocity` reference option, with derivative
+requests rejected. No kernel normalization or physical conventions change.
 
 ## Errors, singularities and dimensional scaling
 

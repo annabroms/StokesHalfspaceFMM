@@ -7,7 +7,6 @@ addpath(blake_repo_root, ...
     fullfile(blake_repo_root,'benchmarks'), ...
     fullfile(blake_repo_root,'tests'));
 
-% Select only the FMM3D checkout, never its sibling FMM3D_basic installation.
-blake_fmm_directory = fullfile(fileparts(blake_repo_root),'FMM3D','FMM3D','matlab');
-blake.setup(blake_fmm_directory);
-clear blake_repo_root blake_fmm_directory;
+% Use FMM3D_MATLAB when set; otherwise discover the sibling FMM3D checkout.
+blake.setup;
+clear blake_repo_root;

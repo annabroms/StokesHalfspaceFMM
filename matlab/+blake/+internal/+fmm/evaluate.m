@@ -3,8 +3,8 @@ function [stokes, harmonic, timing] = evaluate(geom, data, tolerance, order, bac
 if nargin==0, self_test(); stokes=[]; harmonic=[]; timing=[]; return; end
 if nargin<5, backend='auto'; end
 if strcmp(backend,'auto')
+    % The updated STFMM3D skips unused Laplace derivatives internally.
     backend='upstream';
-    if order==1, backend='laplace-velocity'; end
 end
 if order>1 && strcmp(backend,'laplace-velocity')
     error('blake:UnsupportedBackend','laplace-velocity supports velocity only; use auto or upstream.');
@@ -34,10 +34,13 @@ if strcmp(backend,'laplace-velocity')
     timing.strength_seconds=timing.strength_seconds+t.packing_seconds;
     timing.assembly_seconds=timing.assembly_seconds+t.assembly_seconds;
 else
+    % Velocity: Stokes flags (0,1) -> internal Laplace flags (0,2).
+    % Pressure also needs only Laplace gradients; order 3 needs Hessians.
     timer=tic; A=stfmm3d(tolerance,s,0,geom.targets,order);
     timing.stokes_seconds=toc(timer);
 end
 timer=tic;
+% The harmonic velocity/pressure correction needs gradients, not Hessians.
 [L,ier]=lfmm3d(tolerance,l,0,geom.targets,max(2,order));
 timing.laplace_seconds=toc(timer);
 if ier~=0, error('blake:FMMFailure','Harmonic Laplace FMM returned ier=%d.',ier); end

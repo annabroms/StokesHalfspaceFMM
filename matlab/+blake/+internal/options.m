@@ -3,7 +3,7 @@ function opts = options(input)
 if nargin == 0, input = struct(); end
 opts = struct('mu',1,'wall_height',0,'tol',1e-9,'method','fmm', ...
     'block_size',[256 512],'diagnostics',false,'requested',{{'velocity'}}, ...
-    'normals',zeros(3,0),'stokes_backend','auto');
+    'normals',zeros(3,0),'stokes_backend','auto','fmm_backend','two-call');
 if ~isstruct(input) || ~isscalar(input)
     error('blake:InvalidOptions','Options must be a scalar structure.');
 end
@@ -21,6 +21,10 @@ validateattributes(opts.block_size,{'double'},{'real','finite','integer','positi
 validateattributes(opts.diagnostics,{'logical'},{'scalar'});
 opts.method = validatestring(opts.method,{'blake','ggv-direct','fmm'});
 opts.stokes_backend=validatestring(opts.stokes_backend,{'auto','upstream','laplace-velocity'});
+opts.fmm_backend=validatestring(opts.fmm_backend,{'two-call','one-call'});
+if strcmp(opts.fmm_backend,'one-call') && strcmp(opts.stokes_backend,'laplace-velocity')
+    error('blake:UnsupportedBackend','one-call uses its own folded Fortran composition.');
+end
 if ischar(opts.requested) || isstring(opts.requested)
     opts.requested = cellstr(opts.requested);
 end

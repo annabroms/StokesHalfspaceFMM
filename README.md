@@ -32,12 +32,34 @@ setpath;
 
 This adds the repository root, MATLAB package directory, examples, benchmarks
 and tests. The script locates the repository from its own file location and
-expects FMM3D at `../FMM3D/FMM3D/matlab`. For a different dependency location:
+looks for a sibling FMM3D checkout at `../FMM3D/matlab` or
+`../FMM3D/FMM3D/matlab`. To select a different location for `setpath`, examples
+and tests, set `FMM3D_MATLAB` before setup:
+
+```matlab
+setenv('FMM3D_MATLAB', '/path/to/FMM3D/matlab');
+setpath;
+```
+
+An explicit setup argument takes priority over that environment variable:
 
 ```matlab
 addpath('matlab');
 manifest = blake.setup('/path/to/FMM3D/matlab');
 ```
+
+Use the updated FMM3D build: its Stokes driver requests Laplace gradients
+only for velocity/pressure, and skips source evaluation for target-only calls.
+After changing that Fortran source, rebuild its MATLAB interface:
+
+```bash
+make -C ../FMM3D/FMM3D matlab
+```
+
+Then run `clear fmm3d; setpath` in MATLAB to unload the previous MEX and select
+the rebuilt installation. `which stfmm3d -all` and `which fmm3d -all` show the
+resolved paths. The expected directory is `../FMM3D/FMM3D/matlab`, **not**
+`../FMM3D/FMM3D_basic/matlab`.
 
 Only the selected dependency directory is added. `blake.setup` checks that both
 wrappers and the MEX resolve to one directory. See
@@ -58,7 +80,7 @@ opts = struct('method','fmm','mu',1.5,'tol',1e-9);
 SI inputs give m/s. Forces have no quadrature weights added implicitly.
 Defaults are `mu=1`, `wall_height=0`, `tol=1e-9`, `method='fmm'`,
 `block_size=[256 512]` (target/source block sizes), `diagnostics=false`,
-and `stokes_backend='auto'`.
+`stokes_backend='auto'`, and `fmm_backend='two-call'`.
 Methods are `blake`, `ggv-direct`, and `fmm`. The option name `ggv-direct`
 abbreviates the three authors' surnames and selects direct evaluation of their
 half-space image representation; it is not a formal name for the method.
@@ -95,20 +117,44 @@ One-shot direct evaluations skip this FMM-only assessment. Repeated application
 to checked geometry reports `guard_reused=true`, `guard_seconds=0`.
 
 `opts.stokes_backend` selects the free-space Stokes implementation within the
-half-space calculation. The default is `auto`, so ordinary `blake.velocity`,
-`blake.apply`, and velocity-only `blake.fields` calls use `laplace-velocity`
-without specifying an option. Requests containing pressure, gradients or
-traction use upstream Stokes to obtain the required fields together:
+half-space calculation:
 
-- `auto`: four-potential `laplace-velocity` for velocity-only requests; upstream
-  Stokes for pressure or gradients.
-- `upstream`: always use the original `stfmm3d` path.
-- `laplace-velocity`: explicitly select the target-only four-potential adapter;
-  derivative requests raise `blake:UnsupportedBackend`.
+- `auto` (default): use the updated `stfmm3d` for every requested field.
+- `upstream`: explicitly select that same updated Fortran implementation.
+- `laplace-velocity`: explicitly select the legacy MATLAB four-potential
+  reference adapter for velocity comparisons. It is no longer selected by
+  default; derivative requests raise `blake:UnsupportedBackend`.
 
-The adapter uses the same installed FMM3D binary, without a new MEX or external
-library edits. `info.stokes_backend` records the effective choice. The separate
-harmonic correction and all physical conventions are preserved.
+Ordinary `blake.velocity`, `blake.apply`, and velocity-only `blake.fields`
+calls use `stfmm3d(tol,srcinfo,0,targets,1)`. The updated Fortran code performs
+the four-potential composition and recentering internally, with Laplace flags
+`(0,2)`: no source fields and **no Laplace Hessians**. The separate harmonic
+correction also calls `lfmm3d` with flags `(0,2)`. No standalone
+`stfmm3d_laplace` wrapper is used or required.
+
+Pressure requests use Stokes flag 2 and harmonic Laplace flag 2, also without
+Hessians. Velocity-gradient and traction requests use flag 3 and require
+Laplace Hessians to compute those derivatives. `info.stokes_backend` records
+the effective choice; the historical name `upstream` denotes the selected
+updated installation, not the sibling `FMM3D_basic` checkout.
+
+## Optional single-call Fortran backend
+
+The existing two-call implementation remains the default. To build and select
+one folded four-potential Laplace call instead:
+
+```matlab
+setpath;
+blake.build_onecall;
+opts = struct('fmm_backend','one-call','tol',1e-9);
+[u,info] = blake.velocity(sources,forces,targets,opts);
+```
+
+The new backend supports velocity and pressure, uses no Laplace Hessians,
+and leaves the external FMM3D installation unchanged. Gradients/traction remain
+available through the default two-call path. Run `compare_fmm_calls` separately
+to compare fields, raw wall residuals, reciprocity and scaling of both methods.
+See [the derivation, build instructions and measured comparison](docs/one-call-fmm.md).
 
 ## Wall rotlets, potential dipoles and stresslets
 
@@ -139,6 +185,7 @@ evaluation is a readable pair-by-pair reference and is slower than blocked veloc
 
 ```matlab
 addpath('tests');
+blake.build_onecall;               % build optional backend for its acceptance tests
 results = run_tests;               % full acceptance, requires FMM3D, no skipped tests
 results = run_tests(false);        % direct tests; missing FMM checks are INCOMPLETE
 addpath('examples');
@@ -218,7 +265,9 @@ comparison = compare_stokes_backends;
 % compare_stokes_backends(struct('sizes',[512 2048],'tol',1e-9,'save',false));
 ```
 
-It evaluates **free-space Stokeslet velocity only**, using Ns ordinary sources
+It compares the updated Fortran Stokes composition (`upstream`) with the
+legacy MATLAB four-potential reference (`laplace-velocity`). It evaluates
+**free-space Stokeslet velocity only**, using Ns ordinary sources
 and independent targets; there is no wall, source reflection or harmonic
 correction. Defaults are Ns=512,2048; Nt/Ns=1/4,1,4; seven paired repetitions;
 a centered unit cube; fixed seed; mu=1; tolerance 1e-9. It warms both paths,
@@ -242,9 +291,9 @@ the correctness suite.
 - Double precision cannot recover separations already lost in the input, and
   extreme geometry or force ranges can overflow. Severe cancellation limits
   final relative accuracy.
-- The upstream Stokes MATLAB wrapper hides its internal `ier`. The new velocity
-  adapter checks the Laplace `ier` explicitly; pressure/gradient requests still
-  have the upstream status limitation. Both paths check output validity.
+- The Stokes MATLAB wrapper hides its internal `ier`, including for the updated
+  default velocity path. The optional legacy MATLAB adapter checks Laplace
+  `ier` explicitly. Both paths check output validity.
 - No FMM tree/expansion reuse is exposed by this interface.
 
 See [formulas and derivative conventions](docs/formulas.md),
