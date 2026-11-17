@@ -17,7 +17,26 @@ the external FMM3D library. An independently implemented direct Blake tensor
 provides a reference. Pressure, target velocity gradients and complete traction
 are also available through `blake.fields`.
 
-## Setup
+## Python velocity
+
+The Python package provides physical Blake velocity using two existing
+`fmm3dpy` wrappers: one Stokes call for the physical and reflected forces, and
+one Laplace charge/dipole call for the Papkovich–Neuber correction. It also
+provides an independent blocked direct Blake tensor reference. Both preserve
+component-first `(3, N)` arrays and evaluate raw wall residuals.
+
+From the repository root, using the Python interpreter with NumPy and your
+existing `fmm3dpy` installation:
+
+```bash
+PYTHONPATH=python OMP_NUM_THREADS=1 python3 python/tests/run_tests.py
+PYTHONPATH=python OMP_NUM_THREADS=1 python3 examples/validate_velocity.py --output results/python_validation.json
+```
+
+See [Python usage and numerical conventions](docs/python.md) and the
+[measured Python verification record](docs/python-validation.md).
+
+## MATLAB setup
 
 Tested with MATLAB R2025a on Ubuntu 22.04.5 LTS (Linux x86-64); FMM evaluation requires
 a compiled FMM3D MATLAB installation. Direct evaluation requires no external

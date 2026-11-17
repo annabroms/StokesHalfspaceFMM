@@ -8,3 +8,10 @@ results/*
 
 # Local native objects and exact build provenance
 /native/build/
+
+# Python build and interpreter artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/

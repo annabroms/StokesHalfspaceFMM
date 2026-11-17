@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stokes-halfspace-fmm"
+version = "0.1.0"
+description = "Physical Blake velocity with an independent direct reference and two FMM3D calls"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+fmm = ["fmm3dpy>=2.1.0"]
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["blake*"]

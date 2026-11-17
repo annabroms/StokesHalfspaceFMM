@@ -1,0 +1,136 @@
+# Python Blake velocity
+
+The Python implementation evaluates velocity above a horizontal no-slip wall.
+The accelerated representation is due to **Z. Gimbutas, L. Greengard and
+S. Veerapaneni**, *Simple and efficient representations for the fundamental
+solutions of Stokes flow in a half-space*, JFM 776 (2015), R1,
+[doi:10.1017/jfm.2015.302](https://doi.org/10.1017/jfm.2015.302).
+The independent reference implements J. R. Blake's original tensor, equation
+(16), [doi:10.1017/S0305004100049902](https://doi.org/10.1017/S0305004100049902).
+See the shared [formula conventions](formulas.md).
+
+## Environment and usage
+
+Use Python 3.10 or newer with NumPy. Accelerated evaluation additionally needs
+the existing compiled `fmm3dpy` installation. No MFS package or MATLAB bridge is
+used. Nothing in this package builds or modifies the external FMM3D repository.
+Select the interpreter that imports the intended installation:
+
+```bash
+python3 -c 'import sys, numpy, fmm3dpy; print(sys.executable); print(numpy.__version__); print(fmm3dpy.__file__)'
+```
+
+From the repository root, set `PYTHONPATH=python`, or install this repository's
+package into an existing environment. A root-level project definition supplies
+the package metadata; the distribution is `stokes-halfspace-fmm`, imported as
+`blake`. FMM3D is optional for direct-only use.
+
+```python
+import numpy as np
+import blake
+
+sources = np.array([[0, .5], [0, .2], [1, .7]])
+forces = np.array([[1, -.3], [0, .4], [.2, 1]])
+targets = np.array([[.1, .4, .7], [.2, .3, .1], [0, .5, 1.2]])
+
+u, info = blake.velocity(sources, forces, targets,
+                         mu=1.5, tol=1e-9, return_info=True)
+reference = blake.velocity(sources, forces, targets, mu=1.5, method="blake")
+
+geom = blake.prepare(sources, targets, wall_height=0)
+same = blake.apply(geom, forces, mu=1.5, tol=1e-9)
+tensor = blake.blake_pair(sources[:, :1], targets[:, 1:2], mu=1.5)
+```
+
+Inputs have components first, points second, including singletons `(3, 1)` and
+empties `(3, 0)`. Real numeric inputs are copied into float64 storage; complex,
+nonfinite and incorrectly shaped arrays are rejected. Sources must be strictly
+above `wall_height`; targets may lie on the wall. `mu` is positive. Forces act
+on the fluid, with no implicit quadrature weights. Returned velocity is physical
+velocity, including division by viscosity. SI inputs produce m/s.
+
+Defaults are `method="fmm"`, `mu=1`, `wall_height=0`, `tol=1e-9`,
+`block_size=(256, 512)`, `diagnostics=False`, `return_info=False`.
+Block sizes are target/source counts for direct work and diagnostics.
+The Python interface currently supports velocity only.
+
+## Two-call evaluation
+
+After translating the wall to zero, source height is `h`, target height is `z`,
+and reflected quantities are `y*=(y1,y2,-h)`, `f*=(f1,f2,-f3)`.
+
+1. Call `fmm3dpy.stfmm3d` with combined sources `[y,y*]` and Stokeslet
+   strengths `[f,-f*]`, using `ifppreg=0`, `ifppregtarg=1`, `nd=1`.
+2. Call `fmm3dpy.lfmm3d` at image sources with `charges=f*[2,:]` and
+   `dipvec=h*f*`, using `pg=0`, `pgt=2`, `nd=1`.
+3. Assemble `u=(v-z*grad(phi)+e3*phi)/mu` from the returned target fields.
+
+No extra `4*pi` or `8*pi` multiplier is applied: these normalizations are
+already in the wrappers. `dipvec` denotes the source derivative of the harmonic
+Green function. Both `ier` status codes, field presence, shapes and finite
+values are checked. See the [official Python wrapper documentation](https://fmm3d.readthedocs.io/en/latest/python.html).
+
+Each nonempty evaluation makes exactly two public wrapper calls. The internal
+Stokes driver implementation and derivative work depend on the selected FMM3D
+build. No Hessian is requested through the Python interface. Prepared geometry
+reuses translation and reflection, but the proximity guard runs on each FMM
+application, and neither FMM trees nor expansions are reused.
+
+## Direct reference and exceptional cases
+
+The [pair tensor](../python/blake/direct.py) computes explicit Blake tensor
+entries; its blocked velocity contraction implements the original tensor
+formula separately. Neither calls the Papkovich–Neuber assembly. Workspaces
+are bounded by the supplied block sizes, with no full interaction matrix.
+
+Exact physical source/target coincidences raise `SingularInteractionError`,
+even for zero forces. Coincidences are checked in original coordinates before
+translation. Duplicated sources contribute additively. Empty inputs preserve
+output shape and require no FMM import or calls.
+
+An occupied-bin proximity guard raises `FMMResolutionError` for physical or
+reflected sources within `64*eps*span` of a target. It prevents the backend's
+small-distance exclusion from silently dropping an interaction. Direct
+evaluation remains available for noncoincident near pairs. Overflow and
+nonfinite outputs raise explicit errors; no regularization is introduced.
+
+## Diagnostics and validation
+
+`diagnostics=True` adds `info["constituent_scale"]`: the sum of the norms of
+the individual physical Stokes, reflected Stokes, `z*grad(phi)` and `e3*phi`
+terms, divided by `mu`. It costs O(Ns*Nt) direct work in bounded blocks and is
+disabled by default. Call `blake.metrics(u, reference, scale)` for maximum
+pointwise absolute error, global Frobenius relative error, and maximum
+constituent-normalized error. Relative error is NaN for a negligible reference,
+including a zero wall reference. The validation JSON encodes it as null.
+
+```bash
+PYTHONPATH=python OMP_NUM_THREADS=1 python3 python/tests/run_tests.py
+PYTHONPATH=python OMP_NUM_THREADS=1 python3 examples/validate_velocity.py --output results/python_validation.json
+```
+
+Full acceptance exits unsuccessfully if any FMM tests are unavailable. For
+development without FMM3D, `python/tests/run_tests.py --direct-only` allows
+those tests to remain explicitly incomplete. It still runs FMM tests if the
+dependency is available. NumPy is required in both modes.
+
+Computational entry points have deterministic no-argument self-tests, for
+example `blake.blake_pair()`, `blake.direct_velocity()`, `blake.prepare()`,
+`blake.velocity()`, `blake.constituent_scale()` and `blake.metrics()`.
+`blake.fmm.fmm_velocity()` tests the compiled dependency and fails if absent.
+The correctness suite also checks both status codes and two-call dispatch.
+
+The validation driver tests 1,200-source wrapper normalization, four geometries
+over three requested tolerances, Cartesian and random forces, exact wall and
+near-wall targets, independent direct fields, pair reciprocity and distributed
+reciprocity on unequal point clouds. It records actual wrapper/extension paths,
+interpreter and package versions, thread setting, geometry, tolerance and single-evaluation
+timings. These small correctness cases do not establish FMM performance on
+large systems. It runs no benchmark profile.
+
+The empirical constituent-normalized budget is `100*tol+1e-12`; bulk relative
+error uses `100*tol+1e-11` on these well-conditioned bulk fixtures. Neither is
+a mathematical guarantee. Cancellation can set a tolerance-independent floor,
+particularly immediately below shallow sources. All three wall components are
+computed and reported without being overwritten. See the
+[measured verification record](python-validation.md).
