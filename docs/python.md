@@ -134,3 +134,19 @@ a mathematical guarantee. Cancellation can set a tolerance-independent floor,
 particularly immediately below shallow sources. All three wall components are
 computed and reported without being overwritten. See the
 [measured verification record](python-validation.md).
+
+## Reading the implementation
+
+Start with the public calls in [evaluate.py](../python/blake/evaluate.py).
+Geometry preparation validates and translates the coordinates; application
+then selects the direct or FMM evaluator. The numerical modules use `r` for
+physical source-to-target displacement and `r_image` for image displacement.
+Blocked pair arrays have axes `(component, target, source)`.
+
+| Module | Purpose |
+|---|---|
+| [geometry.py](../python/blake/geometry.py) | Coordinate checks, reflection and the FMM proximity guard |
+| [fmm.py](../python/blake/fmm.py) | Strength packing, the two FMM calls and physical velocity assembly |
+| [direct.py](../python/blake/direct.py) | Independent Blake pair tensor and blocked force contraction |
+| [diagnostics.py](../python/blake/diagnostics.py) | Constituent magnitudes and error metrics |
+| [validation.py](../python/blake/validation.py) | Separate wrapper, field and reciprocity checks |

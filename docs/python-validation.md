@@ -37,6 +37,17 @@ versions and resolved dependency paths. Undefined relative wall error is JSON nu
 
 ## Field geometry and accuracy
 
+The readability refactor was rechecked on 2026-11-17: all 13 Python tests and
+28 MATLAB tests passed. Pre/post comparison of the direct and FMM velocities,
+pair tensors and constituent scales was bit-for-bit identical for three
+deterministic geometries (seed 17011; Ns/Nt 1200/81, 73/41 and 13/19; base source
+heights 0.2, 1e-6 and 0.01; the last case uses wall height 1.3 and viscosity 1.7).
+The comparison used `tol=1e-12` and `OMP_NUM_THREADS=1` with the same dependencies
+listed below. The complete field and reciprocity checks measured 2.111 s;
+the [refactor validation JSON](../results/python_readability_validation.json)
+records per-case accuracy, runtime, geometry, tolerance and software provenance.
+This is a correctness execution record, with no performance conclusion.
+
 Seed 927 generates signed normal random forces and independent lateral
 coordinates in a unit square. For each geometry, source heights are in
 `[h,2h]` above the wall. There are 13 wall targets directly below sources and

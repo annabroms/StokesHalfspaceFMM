@@ -24,12 +24,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, help="optional JSON report destination")
     args = parser.parse_args()
-    report = dict(provenance=provenance(), normalization=validate_wrappers(), **validate_velocity())
+    report = {
+        "provenance": provenance(),
+        "normalization": validate_wrappers(),
+        **validate_velocity(),
+    }
     text = json.dumps(clean_json(report), indent=2, allow_nan=False)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n")
-        print(f"Validated {len(report['cases'])} field cases and 3 reciprocity tolerances: {args.output}")
+        print(
+            f"Validated {len(report['cases'])} field cases "
+            f"and 3 reciprocity tolerances: {args.output}"
+        )
     else:
         print(text)
 

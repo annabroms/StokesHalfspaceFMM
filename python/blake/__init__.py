@@ -6,6 +6,14 @@ from .evaluate import apply, velocity
 from .diagnostics import constituent_scale, metrics
 
 __all__ = [
-    "velocity", "apply", "prepare", "Geometry", "blake_pair", "direct_velocity",
-    "constituent_scale", "metrics", "SingularInteractionError", "FMMResolutionError",
+    "velocity",
+    "apply",
+    "prepare",
+    "Geometry",
+    "blake_pair",
+    "direct_velocity",
+    "constituent_scale",
+    "metrics",
+    "SingularInteractionError",
+    "FMMResolutionError",
 ]

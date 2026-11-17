@@ -2,10 +2,16 @@
 
 import numpy as np
 
-from .geometry import Geometry, SingularInteractionError, _array, _scalar, prepare
+from .geometry import (
+    Geometry,
+    SingularInteractionError,
+    _as_scalar,
+    _as_vector_array,
+    prepare,
+)
 
 
-def _blocks(block_size):
+def _block_sizes(block_size):
     """Validate target/source block sizes before allocating interaction workspaces."""
     values = np.asarray(block_size)
     if values.shape != (2,) or values.dtype.kind not in "iu" or np.any(values <= 0):
@@ -16,73 +22,143 @@ def _blocks(block_size):
 def blake_pair(source=None, target=None, *, mu=1.0, wall_height=0.0):
     """Return the (3, 3) Blake velocity tensor for (3, 1) source and target arrays."""
     if source is None and target is None:
-        y, x = np.array([[.1], [-.2], [.7]]), np.array([[.4], [.6], [1.2]])
-        np.testing.assert_allclose(blake_pair(y, x), blake_pair(x, y).T, atol=1e-14)
-        np.testing.assert_allclose(blake_pair(y, [[.4], [.6], [0]]), 0, atol=1e-14)
+        source = np.array([[0.1], [-0.2], [0.7]])
+        target = np.array([[0.4], [0.6], [1.2]])
+        forward = blake_pair(source, target)
+        reverse = blake_pair(target, source)
+        np.testing.assert_allclose(forward, reverse.T, atol=1e-14)
+        wall_tensor = blake_pair(source, [[0.4], [0.6], [0]])
+        np.testing.assert_allclose(wall_tensor, 0, atol=1e-14)
         return None
-    g = prepare(source, target, wall_height)
-    if g.sources.shape != (3, 1) or g.targets.shape != (3, 1):
+
+    geometry = prepare(source, target, wall_height)
+    if geometry.sources.shape != (3, 1) or geometry.targets.shape != (3, 1):
         raise ValueError("Pair coordinates must have shape (3, 1)")
-    mu = _scalar(mu, "mu", positive=True)
-    r, R = (g.targets - g.sources)[:, 0], (g.targets - g.images)[:, 0]
-    a, b, h = 1 / np.linalg.norm(r), 1 / np.linalg.norm(R), g.sources[2, 0]
-    result = np.empty((3, 3))
+    mu = _as_scalar(mu, "mu", positive=True)
+
+    # r points from the physical source to the target; r_image uses the image.
+    r = (geometry.targets - geometry.sources)[:, 0]
+    r_image = (geometry.targets - geometry.images)[:, 0]
+    inverse_r = 1 / np.linalg.norm(r)
+    inverse_image_r = 1 / np.linalg.norm(r_image)
+    height = geometry.sources[2, 0]
+    tensor = np.empty((3, 3))
+
+    # i is the velocity component; j is the applied force component.
     for i in range(3):
         for j in range(3):
-            m = 1 - 2 * (j == 2)
-            T = (i == j) * a + r[i] * r[j] * a**3
-            TI = (i == j) * b + R[i] * R[j] * b**3
-            D = (i == j) * b**3 - 3 * R[i] * R[j] * b**5
-            E = (-(i == 2) * R[j] + (i == j) * R[2] + R[i] * (j == 2)) * b**3
-            E -= 3 * R[i] * R[2] * R[j] * b**5
-            result[i, j] = (T - TI + 2 * h**2 * m * D - 2 * h * m * E) / (8 * np.pi * mu)
-    if not np.isfinite(result).all():
+            same_component = i == j
+            vertical_velocity = i == 2
+            vertical_force = j == 2
+            reflection_sign = 1 - 2 * vertical_force
+
+            stokeslet = same_component * inverse_r + r[i] * r[j] * inverse_r**3
+            image_stokeslet = (
+                same_component * inverse_image_r
+                + r_image[i] * r_image[j] * inverse_image_r**3
+            )
+            source_doublet = (
+                same_component * inverse_image_r**3
+                - 3 * r_image[i] * r_image[j] * inverse_image_r**5
+            )
+            stokes_doublet = (
+                -vertical_velocity * r_image[j]
+                + same_component * r_image[2]
+                + r_image[i] * vertical_force
+            ) * inverse_image_r**3
+            stokes_doublet -= (
+                3 * r_image[i] * r_image[2] * r_image[j] * inverse_image_r**5
+            )
+
+            # Blake (16): physical Stokeslet, image, source doublet, Stokes doublet.
+            tensor[i, j] = (
+                stokeslet
+                - image_stokeslet
+                + 2 * height**2 * reflection_sign * source_doublet
+                - 2 * height * reflection_sign * stokes_doublet
+            ) / (8 * np.pi * mu)
+
+    if not np.isfinite(tensor).all():
         raise FloatingPointError("Blake tensor overflowed; rescale inputs")
-    return result
+    return tensor
 
 
 def direct_velocity(geom=None, forces=None, *, mu=1.0, block_size=(256, 512)):
     """Apply the explicit Blake tensor in bounded blocks; no pair tensor is stored."""
     if geom is None and forces is None:
-        g = prepare([[0, .2], [0, .3], [1, .7]], [[.4], [.2], [1.4]])
-        f = np.array([[1, 2], [3, -1], [2, 1]])
-        reference = sum(blake_pair(g.sources[:, n:n+1], g.targets) @ f[:, n:n+1] for n in range(2))
-        np.testing.assert_allclose(direct_velocity(g, f, block_size=(1, 1)), reference, atol=1e-14)
+        geometry = prepare([[0, 0.2], [0, 0.3], [1, 0.7]], [[0.4], [0.2], [1.4]])
+        forces = np.array([[1, 2], [3, -1], [2, 1]])
+        reference = np.zeros((3, 1))
+        for source_index in range(2):
+            source = geometry.sources[:, source_index : source_index + 1]
+            force = forces[:, source_index : source_index + 1]
+            reference += blake_pair(source, geometry.targets) @ force
+        value = direct_velocity(geometry, forces, block_size=(1, 1))
+        np.testing.assert_allclose(value, reference, atol=1e-14)
         return None
+
     if not isinstance(geom, Geometry):
         raise ValueError("Use geometry returned by prepare()")
-    f = _array(forces, "forces")
-    if f.shape != geom.sources.shape:
+    forces = _as_vector_array(forces, "forces")
+    if forces.shape != geom.sources.shape:
         raise ValueError("forces must have the same shape as sources")
-    mu = _scalar(mu, "mu", positive=True)
-    bt, bs = _blocks(block_size)
-    u = np.zeros_like(geom.targets)
+    mu = _as_scalar(mu, "mu", positive=True)
+    target_block_size, source_block_size = _block_sizes(block_size)
+    velocity = np.zeros_like(geom.targets)
+
     with np.errstate(over="raise", divide="raise", invalid="raise"):
-        for t0 in range(0, u.shape[1], bt):
-            ti = slice(t0, t0 + bt)
-            for s0 in range(0, f.shape[1], bs):
-                si = slice(s0, s0 + bs)
-                r = geom.targets[:, ti, None] - geom.sources[:, None, si]
-                R = geom.targets[:, ti, None] - geom.images[:, None, si]
-                rn, Rn = np.linalg.norm(r, axis=0), np.linalg.norm(R, axis=0)
-                if np.any(rn == 0):
-                    raise SingularInteractionError("A physical pair is unresolved after translation")
-                a, b = 1 / rn, 1 / Rn
-                ff = f[:, si]
-                reflected = ff.copy()
-                reflected[2] *= -1
-                rf = np.einsum("its,is->ts", r, ff)
-                Rf = np.einsum("its,is->ts", R, ff)
-                Rg = np.einsum("its,is->ts", R, reflected)
-                h = geom.sources[2, si]
+        for target_start in range(0, velocity.shape[1], target_block_size):
+            targets = slice(target_start, target_start + target_block_size)
+            for source_start in range(0, forces.shape[1], source_block_size):
+                sources = slice(source_start, source_start + source_block_size)
+
+                # Work arrays have axes (component, target, source) within this block.
+                r = geom.targets[:, targets, None] - geom.sources[:, None, sources]
+                r_image = geom.targets[:, targets, None] - geom.images[:, None, sources]
+                distance = np.linalg.norm(r, axis=0)
+                image_distance = np.linalg.norm(r_image, axis=0)
+                if np.any(distance == 0):
+                    raise SingularInteractionError(
+                        "A physical pair is unresolved after translation"
+                    )
+                inverse_r = 1 / distance
+                inverse_image_r = 1 / image_distance
+                block_forces = forces[:, sources]
+                reflected_forces = block_forces.copy()
+                reflected_forces[2] *= -1
+                heights = geom.sources[2, sources]
+
+                # Contract only the component axis, keeping each target/source pair.
+                r_dot_force = np.einsum("its,is->ts", r, block_forces)
+                image_r_dot_force = np.einsum("its,is->ts", r_image, block_forces)
+                image_r_dot_reflected_force = np.einsum(
+                    "its,is->ts", r_image, reflected_forces
+                )
                 for i in range(3):
-                    v = ff[i] * a + r[i] * rf * a**3 - ff[i] * b - R[i] * Rf * b**3
-                    v += 2 * h**2 * (reflected[i] * b**3 - 3 * R[i] * Rg * b**5)
-                    E = (reflected[i] * R[2] + R[i] * reflected[2]) * b**3
-                    E -= 3 * R[i] * R[2] * Rg * b**5
+                    component = (
+                        block_forces[i] * inverse_r
+                        + r[i] * r_dot_force * inverse_r**3
+                        - block_forces[i] * inverse_image_r
+                        - r_image[i] * image_r_dot_force * inverse_image_r**3
+                    )
+                    component += 2 * heights**2 * (
+                        reflected_forces[i] * inverse_image_r**3
+                        - 3 * r_image[i] * image_r_dot_reflected_force * inverse_image_r**5
+                    )
+                    stokes_doublet = (
+                        reflected_forces[i] * r_image[2]
+                        + r_image[i] * reflected_forces[2]
+                    ) * inverse_image_r**3
+                    stokes_doublet -= (
+                        3 * r_image[i] * r_image[2]
+                        * image_r_dot_reflected_force * inverse_image_r**5
+                    )
                     if i == 2:
-                        E -= Rg * b**3
-                    u[i, ti] += np.sum(v - 2 * h * E, axis=1) / (8 * np.pi * mu)
-    if not np.isfinite(u).all():
+                        stokes_doublet -= image_r_dot_reflected_force * inverse_image_r**3
+                    velocity[i, targets] += np.sum(
+                        component - 2 * heights * stokes_doublet, axis=1
+                    ) / (8 * np.pi * mu)
+
+    if not np.isfinite(velocity).all():
         raise FloatingPointError("Direct velocity overflowed; rescale inputs")
-    return u
+    return velocity
