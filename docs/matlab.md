@@ -16,7 +16,8 @@ opts = struct('method','fmm','mu',1.5,'tol',1e-9);
 SI inputs give m/s. Forces have no quadrature weights added implicitly.
 Defaults are `mu=1`, `wall_height=0`, `tol=1e-9`, `method='fmm'`,
 `block_size=[256 512]` (target/source block sizes), `diagnostics=false`,
-`stokes_backend='auto'`, and `fmm_backend='two-call'`.
+`stokes_backend='auto'`, `fmm_backend='two-call'`, `correct_near_wall=false`,
+and `near_wall_distance=[]`.
 Methods are `blake`, `ggv-direct`, and `fmm`. The option name `ggv-direct`
 abbreviates the three authors' surnames and selects direct evaluation of their
 half-space image representation; it is not a formal name for the method.
@@ -73,6 +74,46 @@ Hessians. Velocity-gradient and traction requests use flag 3 and require
 Laplace Hessians to compute those derivatives. `info.stokes_backend` records
 the effective choice; the historical name `upstream` denotes the selected
 updated installation, not the sibling `FMM3D_basic` checkout.
+
+## Optional near-wall correction
+
+```matlab
+opts = struct('tol',1e-12,'correct_near_wall',true);
+[u,info] = blake.velocity(sources,forces,targets,opts);
+% Optional physical-distance override instead of the automatic cutoff:
+geom = blake.prepare(sources,targets);
+opts.near_wall_distance = 1e-3*geom.span;
+[u,info] = blake.apply(geom,forces,opts);
+```
+
+The same selection rule is used in MATLAB and Python: for full geometry span
+`L`, targets within `max(64*eps,8*eps/tol)*L` of a physical source are selected.
+A radius of `2*L` already selects everything. The cutoff is a roundoff heuristic,
+not an error guarantee. `near_wall_distance=[]` selects automatically; a positive
+physical distance overrides it, subject to the same `64*eps*L` minimum.
+Despite the flag's name, very close bulk pairs are also eligible.
+
+Selected targets receive the complete blocked direct Blake sum over every
+source. Remaining targets use the selected FMM backend: two calls normally,
+one with `fmm_backend='one-call'`. All-selected cases use no FMM calls. Direct
+methods accept the validated flag as a no-op. Exact coincidences still raise,
+and computed wall residuals are never overwritten. No FMM3D changes are needed.
+
+`blake.fields` uses direct Blake evaluation for all requested fields at selected
+targets, including pressure and derivatives; existing backend restrictions still
+apply. The independent derivative reference can be considerably slower than
+blocked velocity. Traction is assembled from the resulting consistent fields.
+
+One-shot correction assesses only the targets remaining in FMM. Changing the
+target subset invalidates a prepared proximity assessment, so that subset is
+checked again. Whole-geometry cached failures do not prevent valid direct
+replacement of noncoincident near pairs.
+
+`info` adds `corrected_target_count`, `near_wall_relative_radius`, the effective
+`near_wall_distance`, `near_wall_detection_seconds` and `near_wall_direct_seconds`.
+`direct_seconds` includes the correction; `total_seconds` includes every phase.
+Selection uses linear storage; direct work costs O(Ns*Ncorrected) in bounded
+blocks. See [cutoff measurements and Python speed comparisons](near-wall-correction.md).
 
 ## Optional single-call Fortran backend
 

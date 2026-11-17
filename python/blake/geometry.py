@@ -1,7 +1,6 @@
 """Validated, translated geometry and bounded-memory singularity checks."""
 
 from dataclasses import dataclass
-from itertools import product
 
 import numpy as np
 
@@ -95,7 +94,7 @@ def prepare(sources=None, targets=None, wall_height=0.0):
 
 
 def guard(geom=None):
-    """Reject unresolved FMM pairs using occupied bins and bounded distance checks."""
+    """Reject unresolved FMM pairs using compiled bins and parallel target checks."""
     if geom is None:
         geometry = prepare([[0, 1], [0, 1], [1e-16, 1]], [[0], [0], [0]])
         try:
@@ -108,37 +107,29 @@ def guard(geom=None):
     relative_threshold = 64 * np.finfo(float).eps
     if not np.isfinite(geom.span) or geom.span <= 0:
         raise FMMResolutionError("The geometry span is not representable")
+    # Import lazily so independent direct evaluation still needs only NumPy.
+    try:
+        from ._proximity import unresolved_pairs
+    except ImportError as exc:
+        raise ImportError(
+            "The FMM proximity guard requires Numba; install stokes-halfspace-fmm[fmm]"
+        ) from exc
     # Normalize first to avoid underflow in a dimensional exclusion threshold.
-    sources = np.concatenate((geom.sources, geom.images), axis=1) / geom.span
-    targets = geom.targets / geom.span
-    origin = np.minimum(sources.min(axis=1), targets.min(axis=1))
-    cell_width = 2 * relative_threshold
-    source_cells = np.floor((sources - origin[:, None]) / cell_width).astype(np.int64)
-    target_cells = np.floor((targets - origin[:, None]) / cell_width).astype(np.int64)
-
-    # Store only occupied cells; each target searches its 27 neighboring cells.
-    occupied_cells = {}
-    for source_index, cell in enumerate(source_cells.T):
-        occupied_cells.setdefault(tuple(cell), []).append(source_index)
-
-    neighbor_offsets = tuple(product((-1, 0, 1), repeat=3))
-    source_count = geom.sources.shape[1]
-    for target_index, cell in enumerate(target_cells.T):
-        for offset in neighbor_offsets:
-            candidates = occupied_cells.get(tuple(cell + offset), ())
-            for start in range(0, len(candidates), 512):
-                subset = candidates[start : start + 512]
-                separation = sources[:, subset] - targets[:, target_index, None]
-                scaled_separation = separation / relative_threshold
-                distance_squared = np.sum(scaled_separation * scaled_separation, axis=0)
-                hits = np.flatnonzero(distance_squared <= 1)
-                if hits.size:
-                    source_index = subset[hits[0]]
-                    kind = "physical" if source_index < source_count else "reflected"
-                    physical_index = source_index % source_count
-                    raise FMMResolutionError(
-                        f"Target {target_index} is within 64*eps*span "
-                        f"of {kind} source {physical_index}; "
-                        "use direct evaluation"
-                    )
+    sources = np.ascontiguousarray(
+        (np.concatenate((geom.sources, geom.images), axis=1) / geom.span).T
+    )
+    targets = np.ascontiguousarray((geom.targets / geom.span).T)
+    hits = unresolved_pairs(sources, targets, relative_threshold)
+    bad_targets = np.flatnonzero(hits >= 0)
+    if bad_targets.size:
+        target_index = int(bad_targets[0])
+        source_index = int(hits[target_index])
+        source_count = geom.sources.shape[1]
+        kind = "physical" if source_index < source_count else "reflected"
+        physical_index = source_index % source_count
+        raise FMMResolutionError(
+            f"Target {target_index} is within 64*eps*span "
+            f"of {kind} source {physical_index}; "
+            "use direct evaluation"
+        )
     return None

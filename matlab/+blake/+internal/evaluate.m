@@ -19,7 +19,10 @@ info=struct('method',opts.method,'requested_tolerance',opts.tol, ...
     'direct_seconds',0,'assembly_seconds',0,'diagnostics_seconds',0, ...
     'stokes_error_flag_exposed',false,'tree_reused',false, ...
     'guard_reused',false,'stokes_backend','none','fmm_backend',opts.fmm_backend, ...
-    'fmm_call_count',0,'laplace_source_flag',0,'laplace_target_flag',0);
+    'fmm_call_count',0,'laplace_source_flag',0,'laplace_target_flag',0, ...
+    'correct_near_wall',opts.correct_near_wall,'corrected_target_count',0, ...
+    'near_wall_relative_radius',[],'near_wall_distance',[], ...
+    'near_wall_detection_seconds',0,'near_wall_direct_seconds',0);
 if geom.ns==0 || geom.nt==0
     fields=struct('velocity',zeros(3,geom.nt));
     if order>=2, fields.pressure=zeros(1,geom.nt); end
@@ -29,46 +32,65 @@ if geom.ns==0 || geom.nt==0
 end
 t=tic; data=blake.internal.halfspace.strengths(geom,forces);
 info.strength_seconds=toc(t);
-if strcmp(opts.method,'blake')
-    t=tic; fields=blake.internal.direct.blake_apply(geom,forces,opts,order);
-    info.direct_seconds=toc(t);
-elseif strcmp(opts.method,'fmm') && strcmp(opts.fmm_backend,'one-call')
-    [fields,timing]=blake.internal.fmm.onecall(geom,data,opts.tol,opts.mu,order);
-    info.guard_seconds=timing.guard_seconds;
-    info.guard_reused=timing.guard_reused;
-    info.stokes_backend=timing.stokes_backend;
-    info.stokes_error_flag_exposed=timing.stokes_error_flag_exposed;
-    info.strength_seconds=info.strength_seconds+timing.strength_seconds;
-    info.assembly_seconds=timing.assembly_seconds;
-    info.laplace_seconds=timing.laplace_seconds;
-    info.fmm_call_count=timing.fmm_call_count;
-    info.laplace_source_flag=timing.laplace_source_flag;
-    info.laplace_target_flag=timing.laplace_target_flag;
-else
-    if strcmp(opts.method,'fmm')
-        [s,l,timing]=blake.internal.fmm.evaluate(geom,data,opts.tol,order,opts.stokes_backend);
+corrected=false;
+if strcmp(opts.method,'fmm') && opts.correct_near_wall
+    t=tic;
+    [selected,radius]=blake.internal.near_wall_targets(geom,opts.tol,opts.near_wall_distance);
+    detection_seconds=toc(t);
+    if any(selected)
+        strength_seconds=info.strength_seconds;
+        [fields,info]=blake.internal.near_wall_apply(geom,forces,opts,order,selected);
+        info.strength_seconds=info.strength_seconds+strength_seconds;
+        corrected=true;
+    end
+    info.correct_near_wall=true;
+    info.corrected_target_count=nnz(selected);
+    info.near_wall_relative_radius=radius;
+    info.near_wall_distance=radius*geom.span;
+    info.near_wall_detection_seconds=detection_seconds;
+end
+if ~corrected
+    if strcmp(opts.method,'blake')
+        t=tic; fields=blake.internal.direct.blake_apply(geom,forces,opts,order);
+        info.direct_seconds=toc(t);
+    elseif strcmp(opts.method,'fmm') && strcmp(opts.fmm_backend,'one-call')
+        [fields,timing]=blake.internal.fmm.onecall(geom,data,opts.tol,opts.mu,order);
         info.guard_seconds=timing.guard_seconds;
         info.guard_reused=timing.guard_reused;
         info.stokes_backend=timing.stokes_backend;
         info.stokes_error_flag_exposed=timing.stokes_error_flag_exposed;
         info.strength_seconds=info.strength_seconds+timing.strength_seconds;
         info.assembly_seconds=timing.assembly_seconds;
-        info.stokes_seconds=timing.stokes_seconds;
         info.laplace_seconds=timing.laplace_seconds;
-        info.fmm_call_count=2;
-        info.laplace_target_flag=max(2,order);
+        info.fmm_call_count=timing.fmm_call_count;
+        info.laplace_source_flag=timing.laplace_source_flag;
+        info.laplace_target_flag=timing.laplace_target_flag;
     else
+        if strcmp(opts.method,'fmm')
+            [s,l,timing]=blake.internal.fmm.evaluate(geom,data,opts.tol,order,opts.stokes_backend);
+            info.guard_seconds=timing.guard_seconds;
+            info.guard_reused=timing.guard_reused;
+            info.stokes_backend=timing.stokes_backend;
+            info.stokes_error_flag_exposed=timing.stokes_error_flag_exposed;
+            info.strength_seconds=info.strength_seconds+timing.strength_seconds;
+            info.assembly_seconds=timing.assembly_seconds;
+            info.stokes_seconds=timing.stokes_seconds;
+            info.laplace_seconds=timing.laplace_seconds;
+            info.fmm_call_count=2;
+            info.laplace_target_flag=max(2,order);
+        else
+            t=tic;
+            s=blake.internal.direct.stokes([geom.sources geom.images],data.stokes, ...
+                geom.targets,opts.block_size,order,false);
+            info.stokes_seconds=toc(t); t=tic;
+            l=blake.internal.direct.laplace(geom.images,data.charges,data.dipoles, ...
+                geom.targets,opts.block_size,order,false);
+            info.laplace_seconds=toc(t);
+        end
         t=tic;
-        s=blake.internal.direct.stokes([geom.sources geom.images],data.stokes, ...
-            geom.targets,opts.block_size,order,false);
-        info.stokes_seconds=toc(t); t=tic;
-        l=blake.internal.direct.laplace(geom.images,data.charges,data.dipoles, ...
-            geom.targets,opts.block_size,order,false);
-        info.laplace_seconds=toc(t);
+        fields=blake.internal.halfspace.assemble(s,l,geom.targets(3,:),opts.mu,order);
+        info.assembly_seconds=info.assembly_seconds+toc(t);
     end
-    t=tic;
-    fields=blake.internal.halfspace.assemble(s,l,geom.targets(3,:),opts.mu,order);
-    info.assembly_seconds=info.assembly_seconds+toc(t);
 end
 if opts.diagnostics
     % Independent O(Ns*Nt) scale calculation is opt-in, never hidden in FMM timing.

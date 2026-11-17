@@ -61,10 +61,10 @@ It preserves the original wall height in the PN correction. Pressure is not
 divided by viscosity. The factors 1/2 reproduce the Stokeslet's 1/(8*pi)
 normalization from the Laplace kernel's 1/(4*pi).
 
-The new [Fortran routine](../native/blake_onecall.f90) packs these four potentials
+The new [Fortran routine](../source/blake_onecall.f90) packs these four potentials
 and calls `lfmm3d` once with source flag 0 and target flag 2. Small unused
 Hessian arguments satisfy the Fortran interface; no Hessian computation is
-requested. The [MEX gateway](../native/blake_onecall_mex.c) intercepts actual
+requested. The [MEX gateway](../source/blake_onecall_mex.c) intercepts actual
 `lfmm3d` invocations at link time, counts them and rejects any call other than
 one four-density invocation with flags `(0,2)`.
 
@@ -90,9 +90,9 @@ interface call, including native packing and reconstruction. Complete public-cal
 timing also includes geometry, checks and physical scaling. Prepared geometry
 reuses checks, not FMM trees.
 
-The build stores the static-library, source and MEX checksums and compiler
-settings in ignored `native/build/build.json`. Rebuild the local backend after
-changing the selected FMM3D installation, its library or the native sources.
+`blake.build_onecall` returns build metadata, including compiler settings.
+Rebuild the backend after changing the selected FMM3D installation, its library
+or the native sources.
 The old `stokes_backend` option continues to select the free-space method for
 `two-call`; the legacy MATLAB adapter is not part of the new backend.
 
@@ -138,7 +138,7 @@ five repetitions, tolerance 1e-8 and fixed seed 481516. Ten percent of timing
 case targets are on the wall; source heights are in [0.1,1.1]. Run separate
 fresh MATLAB processes with `OMP_NUM_THREADS=1` or another desired thread count.
 `save=true` writes a uniquely named MAT report and CSV tables under ignored
-`results/`; provenance includes both the selected FMM3D binary and local build.
+`results/`, including dependency and compiler metadata.
 
 The new [acceptance tests](../tests/test_onecall.m) join the existing suite:
 
@@ -241,19 +241,7 @@ new backend includes packing and reconstruction inside its MEX boundary; the
 old backend performs its final half-space assembly outside its FMM interfaces.
 Complete-call timings include all costs for both implementations.
 
-Full scaling data: [MAT report](../results/tp26da5141_b92e_4aa5_afd8_a8d2fe48d282_fmm_calls.mat),
-[all timing summaries](../results/tp26da5141_b92e_4aa5_afd8_a8d2fe48d282_fmm_calls_timings.csv),
-[raw repetitions](../results/tp26da5141_b92e_4aa5_afd8_a8d2fe48d282_fmm_calls_samples.csv),
-[field accuracy](../results/tp26da5141_b92e_4aa5_afd8_a8d2fe48d282_fmm_calls_accuracy.csv),
-[reciprocity](../results/tp26da5141_b92e_4aa5_afd8_a8d2fe48d282_fmm_calls_reciprocity.csv).
-Generated reports are ignored by Git. Re-run the driver with `save=true` to
-create reports on another installation.
-
-Dependency provenance from this scaling run:
-
-- Selected Stokes wrapper: `FMM3D/matlab/stfmm3d.m`.
-- Selected FMM3D MEX SHA-256: `ac1190b3485d4ad2fa2df77ffd2ec5d659aa66f8a7d2ec62f2c1fe239e1dc650`.
-- Linked static library SHA-256: `d12369e678370951e7d260f597ede596cb6fbb3e60b997470181fa1034a0ba43`.
-- One-call MEX SHA-256: `8b1a0526e4a9e366c466117d13a9de059762ae183370f947dd6a8c4fd328bc40`.
-- The complete build record, compiler settings and source checksums are in
-  `native/build/build.json` and in the saved report metadata.
+Run the comparison driver with `save=true` to generate the MAT report, timing
+summaries, raw repetitions, field accuracy and reciprocity tables for your
+installation. The measurements above used the compiled FMM3D MATLAB interfaces
+and the one-call backend linked against the FMM3D static library.

@@ -48,18 +48,57 @@ normal, or define a potential dipole with the opposite sign or a factor of two.
 
 ## Checked references
 
-Z. Gimbutas, L. Greengard and S. Veerapaneni, *Simple and efficient representations
-for the fundamental solutions of Stokes flow in a half-space*, JFM 776 (2015), R1,
-[DOI](https://doi.org/10.1017/jfm.2015.302). Equation numbers here refer to the
-[arXiv v2 PDF](https://arxiv.org/pdf/1504.00102v2), checked directly during
-implementation: stresslet (7)-(9), harmonic dipole/quadrupole (15)-(16),
-Papkovich–Neuber (17), stresslet wall correction (26)-(27), symmetric doublet
-relation (28)-(32), and rotlet (33)-(35).
+All three implemented families have published image systems for an infinite
+stationary **no-slip** plane wall. The potential dipole is also called a
+**source dipole**, **source doublet** or **potential doublet** in the literature.
 
-The potential dipole is derived below from the **entire** independent Blake tensor,
-J. R. Blake (1971), equation (16), whose normalization is documented in
-[formulas](formulas.md). It is not presented as a standalone potential-dipole wall
-formula in the Gimbutas–Greengard–Veerapaneni paper.
+| Implemented family | Published wall derivation / formula |
+| --- | --- |
+| Rotlet | Blake & Chwang [1]; Gimbutas–Greengard–Veerapaneni [2], section 3.3, (33)-(35); Spagnolie & Lauga [3], appendix B.5, (B16) |
+| Potential dipole | Blake & Chwang [1], source-doublet image system; Spagnolie & Lauga [3], appendix B.4, (B13), for arbitrary tilt |
+| Oriented stresslet (double-layer kernel) | Gimbutas–Greengard–Veerapaneni [2], section 3.2, Theorem 1, (25)-(32); Spagnolie & Lauga [3], appendix B.7, (B26)-(B30) |
+
+1. J. R. Blake and A. T. Chwang, *Fundamental singularities of viscous flow.
+   Part I: The image systems in the vicinity of a stationary no-slip boundary*,
+   Journal of Engineering Mathematics **8** (1974), 23–29,
+   [DOI / publisher summary](https://doi.org/10.1007/BF02353701).
+   The publisher summary explicitly identifies wall image systems for rotlets,
+   sources and source doublets, as well as Stokeslets. Its historical use of
+   “stresslet” for a rotlet should not be confused with the symmetric double-layer
+   kernel implemented here.
+2. Z. Gimbutas, L. Greengard and S. Veerapaneni, *Simple and efficient
+   representations for the fundamental solutions of Stokes flow in a half-space*,
+   Journal of Fluid Mechanics **776** (2015), R1,
+   [DOI](https://doi.org/10.1017/jfm.2015.302),
+   [open-access arXiv v2 PDF](https://arxiv.org/pdf/1504.00102v2).
+   Equation numbers for this reference throughout this document use **arXiv v2**:
+   stresslet (7)-(9), harmonic dipole/quadrupole (15)-(16), Papkovich–Neuber (17),
+   stresslet wall correction (26)-(27), symmetric doublet relation (28)-(32),
+   rotlet (33)-(35), and general Stokes doublet (36)-(38).
+3. S. E. Spagnolie and E. Lauga, *Hydrodynamics of self-propulsion near a boundary:
+   predictions and accuracy of far-field approximations*, Journal of Fluid
+   Mechanics **700** (2012), 105–147,
+   [DOI](https://doi.org/10.1017/jfm.2012.101),
+   [author-hosted published PDF](https://people.math.wisc.edu/~spagnolie/Papers/SpagnolieLaugaJFM2012.pdf).
+   Appendix B supplies explicit no-slip image systems, including the families in
+   the table. The image formulas themselves apply to the stated point
+   singularities; the swimmer model uses a far-field truncation.
+
+Reference scope was checked on 2026-11-17 against the publisher summary for [1]
+and the linked full-text PDFs for [2] and [3].
+
+Normalization matters: Spagnolie & Lauga define `D=-(1/2)*Delta_y G` in (2.12)
+and `T=-6*r*(r.d)*(r.e)/r^5` in (2.16). Our potential dipole and stresslet use
+the opposite signs, with the physical factor `1/(8*pi*mu)`. Their rotlet (2.13)
+has the same cross-product sign as ours before this physical factor. Appendix
+B.2 treats the symmetric Stokeslet dipole; B.7 is the reference for our
+double-layer stresslet with its trace contribution.
+
+The potential-dipole implementation below derives its normalization and complete
+wall correction from the **entire** independent Blake tensor, J. R. Blake (1971),
+equation (16), documented in [formulas](formulas.md). The wall singularity is
+established in [1] and [3]; it is not presented as a standalone potential-dipole
+wall formula in the Gimbutas–Greengard–Veerapaneni paper.
 
 ## Computational sections and derivation
 
@@ -225,9 +264,6 @@ These are individual small-problem timings, not benchmark-profile statistics.
 Direct arithmetic has no requested approximation tolerance (the inherited
 `tol=1e-9` option is unused). Runs used MATLAB R2025a
 `25.1.0.2943329`, Linux x86-64, `OMP_NUM_THREADS=1`; MATLAB reported
-`maxNumCompThreads=8`. FMM-dependent existing tests used the installation at
-`FMM3D/matlab`, source revision
-`c89238cfaf32e4c3eff4192065462b8ec968ed51`, MEX SHA-256
-`c6fd530d68482b2eff6ecdbb509affd7cb5689cffd2782b0dd1d2518053eaba9`.
-This provenance was queried from the active installation and supersedes older
-installation snapshots for this validation run. No benchmark profile was run.
+`maxNumCompThreads=8`. Existing FMM-dependent tests used the compiled FMM3D
+MATLAB interfaces; the three direct singularity kernels require only MATLAB.
+No benchmark profile was run.

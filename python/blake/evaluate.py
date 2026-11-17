@@ -17,15 +17,25 @@ def apply(
     mu=1.0,
     tol=1e-9,
     block_size=(256, 512),
+    correct_near_wall=False,
+    near_wall_distance=None,
     diagnostics=False,
     return_info=False,
 ):
-    """Evaluate prepared geometry; select method='blake' for the independent direct sum."""
+    """Evaluate prepared geometry with FMM or independent direct Blake sums.
+
+    correct_near_wall=True routes ill-conditioned close targets to direct summation.
+    """
     if geom is None and forces is None:
         geometry = prepare([[0], [0], [1]], [[0.2], [0.4], [2]])
         forces = np.array([[1], [2], [3]])
         value = apply(geometry, forces, method="blake")
         np.testing.assert_allclose(value, direct_velocity(geometry, forces))
+        shallow = prepare([[0, 0.5], [0, 0.5], [1e-6, 1]], [[0], [0], [0]])
+        strengths = np.repeat(forces, 2, axis=1)
+        corrected, info = apply(shallow, strengths, correct_near_wall=True, return_info=True)
+        np.testing.assert_array_equal(corrected, direct_velocity(shallow, strengths))
+        assert info["corrected_target_count"] == 1 and info["fmm_call_count"] == 0
         return None
 
     timer = perf_counter()
@@ -39,6 +49,12 @@ def apply(
     if tol >= 1 or method not in ("fmm", "blake"):
         raise ValueError("Require 0 < tol < 1 and method='fmm' or 'blake'")
     block_size = _block_sizes(block_size)
+    if not isinstance(correct_near_wall, (bool, np.bool_)):
+        raise ValueError("correct_near_wall must be a boolean")
+    if near_wall_distance is not None:
+        near_wall_distance = _as_scalar(
+            near_wall_distance, "near_wall_distance", positive=True
+        )
     info = {
         "method": method,
         "ns": forces.shape[1],
@@ -51,10 +67,42 @@ def apply(
         "diagnostics_seconds": 0.0,
         "fmm_call_count": 0,
         "tree_reused": False,
+        "correct_near_wall": bool(correct_near_wall),
+        "corrected_target_count": 0,
+        "near_wall_relative_radius": None,
+        "near_wall_distance": None,
+        "near_wall_detection_seconds": 0.0,
+        "near_wall_direct_seconds": 0.0,
     }
 
     if method == "fmm":
-        field, timing = fmm_velocity(geom, forces, mu=mu, tol=tol)
+        if correct_near_wall:
+            from .near_wall import select_targets, target_subset
+
+            start = perf_counter()
+            selected, radius = select_targets(geom, tol=tol, distance=near_wall_distance)
+            info["near_wall_relative_radius"] = radius
+            info["near_wall_distance"] = radius * geom.span
+            info["corrected_target_count"] = int(np.count_nonzero(selected))
+            info["near_wall_detection_seconds"] = perf_counter() - start
+        else:
+            selected = None
+
+        if selected is not None and np.any(selected):
+            far_field, timing = fmm_velocity(
+                target_subset(geom, ~selected), forces, mu=mu, tol=tol
+            )
+            start = perf_counter()
+            near_field = direct_velocity(
+                target_subset(geom, selected), forces, mu=mu, block_size=block_size
+            )
+            info["near_wall_direct_seconds"] = perf_counter() - start
+            info["direct_seconds"] = info["near_wall_direct_seconds"]
+            field = np.empty_like(geom.targets)
+            field[:, ~selected] = far_field
+            field[:, selected] = near_field
+        else:
+            field, timing = fmm_velocity(geom, forces, mu=mu, tol=tol)
         info.update(timing)
     else:
         start = perf_counter()

@@ -45,9 +45,9 @@ and traction requests require them. The optional `laplace-velocity` backend is
 retained only as an explicitly selected MATLAB reference for comparisons.
 
 Rebuild the updated FMM3D MATLAB interface with `make matlab` from its own
-checkout, then run `clear fmm3d` before `setpath` here. The setup path selects
-`../FMM3D/FMM3D/matlab`, never the sibling `FMM3D_basic` installation. No
-standalone `stfmm3d_laplace` wrapper is required.
+checkout, then run `clear fmm3d` before `setpath` here. Use `FMM3D_MATLAB` or
+an explicit setup argument to select the rebuilt installation. No standalone
+`stfmm3d_laplace` wrapper is required.
 
 ## Tested system
 
@@ -59,19 +59,17 @@ were run on:
 | Operating system | Ubuntu 22.04.5 LTS, Linux x86-64 |
 | MATLAB | R2025a, version 25.1.0.2943329 |
 | Processor | AMD Ryzen 7 PRO 8840HS, 8 cores / 16 logical CPUs |
-| FMM3D source checkout | Commit `70455e020be1ff64445757cf71ae361f741ea282` |
+| FMM3D | Compiled MATLAB Stokes and Laplace interfaces |
 | FMM thread settings | Separate runs with `OMP_NUM_THREADS=1` and `8` |
 
 Other MATLAB releases and operating systems have not been validated here.
-The source revision identifies the tested checkout; it does not by itself
-establish which source produced a particular MEX binary.
 
 ## Reproducibility and interface limits
 
-Each saved benchmark report records the resolved dependency paths, source
-revision, MEX checksum, MATLAB version, hardware and thread settings. Generated
-reports under `results/` are ignored by Git. Machine-specific installation
-notes are kept separately in the ignored `docs/dependencies.local.md` file.
+Saved benchmark reports record dependency metadata, MATLAB version, hardware
+and thread settings. Generate reports for your installation using the
+[benchmark drivers](benchmarks.md). The measurements documented here include
+their geometry, tolerance and execution settings.
 
 The current adapter rebuilds FMM trees on each evaluation. The inspected
 Stokes MATLAB wrapper does not expose its internal error code; the Laplace
@@ -91,11 +89,72 @@ needed to avoid unnecessary Hessians in normal velocity evaluation.
 
 The `stokes_error_flag_exposed` field is false for the default Stokes wrapper
 and true for the legacy `laplace-velocity` adapter. Manifests identify the
-resolved wrappers, binary checksum and default backend; evaluation records
-name the backend actually used. The historical tested-system table above
-records the earlier validation environment, not a fingerprint of a newly
-rebuilt MEX binary.
+selected dependency and default backend; evaluation records name the backend
+actually used. The tested-system table above describes the historical
+validation environment.
 
 Prepared geometry caches a version-1 proximity assessment, not FMM data. Missing,
 unchecked or differently versioned assessments are recomputed before evaluation.
 There is no tree or expansion reuse, and no persistent global geometry cache.
+
+## Python guard dependency
+
+The default Python FMM proximity guard requires Numba in addition to NumPy and
+`fmm3dpy`; the `fmm` packaging extra declares both accelerated dependencies.
+Install `.[fmm]` in the intended environment, preserving the selected OpenMP
+FMM3D build. Direct-only evaluation still requires just NumPy. The measured
+configuration uses Numba 0.65.1. Set `NUMBA_NUM_THREADS=8` alongside
+`OMP_NUM_THREADS=8` for matched guard/FMM limits. See the
+[guard behavior and first-call compilation](python.md#parallel-proximity-guard).
+
+## Python bindings with OpenMP
+
+OpenMP support in the Fortran source does not by itself enable threading in
+Python wheels. The Meson Python build must compile the Fortran sources with
+`-fopenmp` and link the extensions against the OpenMP runtime. On the tested
+Linux/GCC system, the following builds a wheel from a disposable copy of the
+selected FMM3D checkout, then installs it into the user Python environment:
+
+```bash
+python3 -m venv --system-site-packages .venv-fmm-openmp
+.venv-fmm-openmp/bin/python -m pip install --upgrade pip meson-python
+.venv-fmm-openmp/bin/python -m pip wheel --no-deps --no-build-isolation \
+    -Csetup-args=-Dfortran_args=-fopenmp \
+    -Csetup-args=-Dfortran_link_args=-fopenmp \
+    -Csetup-args=-Dc_link_args=-fopenmp \
+    -Ccompile-args=-j4 --wheel-dir wheels /path/to/disposable/FMM3D
+python3 -m pip install --user --no-deps --force-reinstall wheels/fmm3dpy-*.whl
+```
+
+The build environment must contain NumPy and have `gfortran`, a C compiler and
+Ninja available. Use a wheel directory containing only the intended build.
+For an isolated runtime, install the wheel into that environment instead of
+using `--user`. The measured rebuild used the existing FMM3D source revision
+`0e13b3deb5e2cb35f9fe691464c00e2700208ad5`; no source changes were required.
+The source checkout and MATLAB installation were left unchanged.
+
+Start a fresh Python process after installation. Set `OMP_NUM_THREADS` before
+importing the bindings, and verify both the imported package and its runtime:
+
+```bash
+OMP_NUM_THREADS=8 python3 - <<'PYOPENMP'
+import ctypes
+from pathlib import Path
+import fmm3dpy
+
+print(fmm3dpy.__file__)
+for name in ("stfmm3d_fortran", "lfmm3d_fortran"):
+    extension = next(Path(fmm3dpy.__file__).parent.glob(name + "*.so"))
+    query = ctypes.CDLL(str(extension)).omp_get_max_threads
+    query.argtypes = []
+    query.restype = ctypes.c_int
+    print(extension.name, "OpenMP maximum threads:", query())
+PYOPENMP
+```
+
+Both extensions should report eight for this command. `ldd` should also list
+`libgomp`, and `nm -D` should expose OpenMP runtime references. The query verifies
+the configured thread limit rather than the number of threads active in every
+FMM phase; use separate-process timing runs to measure the achieved speedup.
+Package version `2.1.0` is unchanged by rebuilding, so retain the wheel or binary
+hashes with performance results. See [the Numba comparison](benchmarks.md#performance-compared-with-direct-numba-evaluation).

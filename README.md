@@ -44,7 +44,7 @@ opts = struct('method','fmm','mu',1.5,'tol',1e-9);
 
 ## Python setup
 
-Use Python 3.10 or newer with NumPy and the compiled `fmm3dpy` interface.
+Use Python 3.10 or newer with NumPy, Numba and the compiled `fmm3dpy` interface.
 Direct evaluation requires only NumPy. Select the interpreter containing your
 FMM3D installation and start Python from the repository root with:
 
@@ -74,6 +74,9 @@ prepared geometry.
 | Direct Blake tensor | `method='blake'` | `method="blake"` |
 | Direct Gimbutas–Greengard–Veerapaneni image representation | `method='ggv-direct'` | — |
 
+Both interfaces support `correct_near_wall` (off by default) to replace poorly
+conditioned close targets with direct Blake sums. See [cutoff choice, accuracy and cost](docs/near-wall-correction.md).
+
 MATLAB offers two FMM compositions: the default
 `fmm_backend='two-call'`, and an optional `fmm_backend='one-call'` that folds
 the representation into four Laplace potentials. Build the latter with
@@ -96,6 +99,10 @@ Both languages evaluate wall Stokeslet velocity. MATLAB additionally provides:
 
 See [MATLAB fields](docs/matlab.md#pressure-gradients-and-traction) and
 [other kernel definitions and tests](docs/singularities.md).
+Published no-slip wall derivations for these other singularities are listed in
+the [singularity references](docs/singularities.md#checked-references), including
+Blake & Chwang (1974), Gimbutas, Greengard & Veerapaneni (2015), and
+Spagnolie & Lauga (2012), with equation pointers and normalization notes.
 
 ## Numerical conventions and limits
 
@@ -140,6 +147,35 @@ Benchmarks are separate from correctness tests and run only when requested.
 Small correctness cases do not establish large-system performance.
 [Benchmark profiles, timing definitions and the direct Numba comparison](docs/benchmarks.md)
 describe the measured tradeoffs and how to reproduce a performance study.
+
+### OpenMP FMM versus direct Numba
+
+With sufficiently large source and target counts, FMM outperforms the direct
+Numba Blake kernel in [RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall).
+The default Python proximity guard uses Numba bins with parallel target
+queries. Measurements on 2026-11-17 on an AMD Ryzen 7 PRO 8840HS used verified OpenMP
+bindings and **eight threads for both evaluators**. Prepared-evaluation times
+in seconds include the complete guard, packing, both FMM calls and assembly:
+
+| Ns = Nt | Direct Numba | FMM, tol 1e-6 | Speedup | FMM, tol 1e-8 | Speedup |
+|---:|---:|---:|---:|---:|---:|
+| 4,096 | 0.0471 | 0.2465 | 0.191x | 0.5343 | 0.0881x |
+| 32,768 | 2.594 | 1.310 | **1.98x** | 2.835 | 0.915x |
+| 131,072 | 40.455 | 5.914 | **6.84x** | 11.560 | **3.50x** |
+
+Speedup is direct Numba time divided by FMM time; values above one favor FMM.
+Direct Numba remains faster at the smallest count; the crossover depends on
+geometry, tolerance, hardware and threading.
+
+Direct Numba entries are single full-solve measurements; FMM entries are
+medians of three full solves after warmup, excluding compilation. Both compute
+every target velocity. At the largest size, sampled FMM relative errors against
+an independent direct sum are **3.63e-6** at `1e-6` and **5.00e-9** at `1e-8`;
+native FMM tolerance does not guarantee relative accuracy of the assembled wall
+field. All comparison checks, **22 Python acceptance tests** and the full MATLAB
+regression suite passed. See [methods, accuracy and provenance](docs/benchmarks.md#performance-compared-with-direct-numba-evaluation),
+[guard dependency and thread controls](docs/python.md#parallel-proximity-guard),
+and [OpenMP build/verification instructions](docs/dependencies.md#python-bindings-with-openmp).
 
 ## Detailed documentation
 

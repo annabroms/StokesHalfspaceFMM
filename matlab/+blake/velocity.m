@@ -5,7 +5,8 @@ if nargin == 0, self_test(); u = []; info = []; return; end
 total_timer=tic;
 if nargin < 4, opts = struct(); end
 opts = blake.internal.options(opts);
-[geom,prep]=blake.prepare(sources,targets,opts.wall_height,strcmp(opts.method,'fmm'));
+precheck_fmm=strcmp(opts.method,'fmm') && ~opts.correct_near_wall;
+[geom,prep]=blake.prepare(sources,targets,opts.wall_height,precheck_fmm);
 [fields,info] = blake.internal.evaluate(geom,forces,opts,1);
 u = fields.velocity;
 info.geometry_seconds=prep.geometry_seconds;

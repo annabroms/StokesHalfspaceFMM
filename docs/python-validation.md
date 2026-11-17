@@ -30,7 +30,7 @@ PYTHONPATH=python OMP_NUM_THREADS=1 python3 examples/validate_velocity.py --outp
 OMP_NUM_THREADS=1 matlab -batch "addpath('matlab','tests'); blake.setup; run_tests;"
 ```
 
-The generated, Git-ignored [JSON report](../results/python_validation.json)
+The validation command generates a JSON report for your installation. It
 contains every measured field case, raw wall component maxima, both wrapper
 call timings, direct and diagnostic timings, normalization checks, package
 versions and resolved dependency paths. Undefined relative wall error is JSON null.
@@ -43,9 +43,7 @@ pair tensors and constituent scales was bit-for-bit identical for three
 deterministic geometries (seed 17011; Ns/Nt 1200/81, 73/41 and 13/19; base source
 heights 0.2, 1e-6 and 0.01; the last case uses wall height 1.3 and viscosity 1.7).
 The comparison used `tol=1e-12` and `OMP_NUM_THREADS=1` with the same dependencies
-listed below. The complete field and reciprocity checks measured 2.111 s;
-the [refactor validation JSON](../results/python_readability_validation.json)
-records per-case accuracy, runtime, geometry, tolerance and software provenance.
+listed below. The complete field and reciprocity checks measured 2.111 s.
 This is a correctness execution record, with no performance conclusion.
 
 Seed 927 generates signed normal random forces and independent lateral
@@ -123,15 +121,10 @@ combination were tested separately.
 
 ## Dependency provenance
 
-The measured interpreter was `/usr/bin/python3`, Python 3.10.12, with NumPy
+The measurements used Python 3.10.12, with NumPy
 2.2.6 and `fmm3dpy` 2.1.0, on Linux x86-64, glibc 2.35, kernel
 6.8.0-138-generic. The configured OpenMP thread count was one.
-The package resolved to
-`/home/anna/.local/lib/python3.10/site-packages/fmm3dpy`.
-
-The external FMM3D checkout reported revision
-`1e73a3b595589bff25a7ab711f14af44870261c7`. This is an inspected checkout
-revision, not proof that it produced the installed Python extensions. Their inspected
-dynamic dependencies contain no separate `libfmm3d.so` or `libgomp.so` entry;
-the `OMP_NUM_THREADS` setting alone does not establish parallel capability of
-these binaries. No external FMM3D files were modified or rebuilt.
+The inspected Python extension dynamic dependencies contain no separate
+`libfmm3d.so` or `libgomp.so` entry; the `OMP_NUM_THREADS` setting alone does not
+establish parallel capability of these binaries. No external FMM3D files were
+modified or rebuilt.

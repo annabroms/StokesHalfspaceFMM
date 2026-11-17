@@ -17,7 +17,8 @@ if traction
         error('blake:InvalidNormals','Traction normals must have unit length.');
     end
 end
-[geom,prep]=blake.prepare(sources,targets,opts.wall_height,strcmp(opts.method,'fmm'));
+precheck_fmm=strcmp(opts.method,'fmm') && ~opts.correct_near_wall;
+[geom,prep]=blake.prepare(sources,targets,opts.wall_height,precheck_fmm);
 [result,info]=blake.internal.evaluate(geom,forces,opts,order);
 info.geometry_seconds=prep.geometry_seconds;
 info.guard_seconds=info.guard_seconds+prep.guard_seconds;

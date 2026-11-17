@@ -1,8 +1,7 @@
 # Verification record
 
 Executed on 2026-10-26 with MATLAB R2025a and the external FMM3D installation
-identified in [dependencies.md](dependencies.md). Generated artifacts are local
-under `results/` and intentionally ignored by Git.
+described in [dependencies.md](dependencies.md).
 
 ## Regression suite and independent diagnostics
 
@@ -16,7 +15,7 @@ are compared against the independently differentiated Blake tensor.
 
 Final verification in the installed repository: **16 passed, 0 failed, 0
 incomplete**. MATLAB Code Analyzer reported **zero findings** across all 25
-MATLAB files. The complete output is in `results/final_verification.log`.
+MATLAB files.
 
 The readable validation driver passed 96 orientation/source-count/height/method
 cases and 21 dimensional-scaling cases. Heights range from 1e-6 to 1e3; the
@@ -34,9 +33,9 @@ These small fixtures mainly verify conventions and roundoff-level cancellation;
 they are not evidence of multipole accuracy at arbitrary sizes. The 1200-source
 regression fixtures and the benchmark sweep provide separate FMM checks.
 
-Outputs: `validation.csv`, `dimensional_scaling.csv`, `validation.mat`, and
-`validation.png`/`.pdf`. Exact zero errors are displayed at 1e-18 **only in the
-plots**; raw data retain zero. No velocity is projected onto the wall condition.
+The validation driver generates accuracy and dimensional-scaling tables and
+plots. Exact zero errors are displayed at 1e-18 **only in the plots**; raw data
+retain zero. No velocity is projected onto the wall condition.
 
 ## Size, tolerance and block benchmarks
 
@@ -59,12 +58,12 @@ One-thread benchmark results at requested tolerance 1e-9:
 - Largest measured complete-evaluation speedup: 2.06. Other cases remained slower
   than direct evaluation; missing crossover entries are NaN, not extrapolations.
 
-Both 45-case profiles completed. Their artifacts are identified as follows:
+Both 45-case profiles completed:
 
-| FMM thread setting | Artifact stem | Maximum measured complete speedup |
-|---|---|---:|
-| OMP_NUM_THREADS=1 | `benchmark_quick_20261026_152645` | 2.06 |
-| OMP_NUM_THREADS=8 | `benchmark_quick_20261026_153138` | 2.00 |
+| FMM thread setting | Maximum measured complete speedup |
+|---|---:|
+| OMP_NUM_THREADS=1 | 2.06 |
+| OMP_NUM_THREADS=8 | 2.00 |
 
 The measured errors agree across these thread settings. More threads did not
 improve every case: at 8192 sources and 32768 targets, measured total times
@@ -87,10 +86,9 @@ The one-thread 1024-by-1024 block study measured median seconds of 0.0711 for
 planned default `[256 512]`; this is one fixture, not a universal optimum.
 All variants agreed within 2.4e-14 maximum absolute velocity difference.
 
-Benchmark filenames contain timestamps and end in `_scaling.csv`,
-`_tolerance.csv`, `_blocks.csv`, `_observations.csv`, `.mat`, `.png`, and `.pdf`.
-MAT files contain hardware, OS, MATLAB version, binary checksum, source revision,
-thread setting, configuration and seed information. Observed slopes include
+The [benchmark drivers](benchmarks.md) generate tables, plots and MAT reports
+with hardware, OS, MATLAB version, dependency metadata, thread setting,
+configuration and seed information. Observed slopes include
 small-size overhead and are descriptive rather than asymptotic complexity claims.
 
 The longer `default` and `large` profiles are implemented but were not executed

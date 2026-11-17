@@ -48,6 +48,7 @@ def fmm_velocity(geom=None, forces=None, *, mu=1.0, tol=1e-9):
 
     timing = {
         "guard_seconds": 0.0,
+        "guard_backend": "numba-bins",
         "strength_seconds": 0.0,
         "stokes_seconds": 0.0,
         "laplace_seconds": 0.0,
