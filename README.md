@@ -19,23 +19,7 @@ return physical velocity and evaluate raw wall residuals. The MATLAB interface
 also provides pressure, target velocity gradients and complete traction through
 `blake.fields`.
 
-## Performance compared with direct Numba evaluation
-
-The number of sources must be sufficiently large, with enough target evaluations,
-for the FMM to outperform the compiled direct Blake velocity kernel in
-[RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall).
-For small and moderate problems, its Numba kernel (with zero source and target
-radii for point forces) can be faster because direct summation avoids FMM tree
-construction and the overhead of the two FMM calls.
-
-In a measured Python comparison with equal source/target counts and FMM tolerance
-`1e-8`, FMM first overtook one-thread Numba at 32,768 sources and targets. At
-131,072 of each, FMM took 40.5 s versus 158.3 s for one-thread Numba; eight-thread
-Numba and FMM were near parity at 39.0 s and 40.4 s. The loaded FMM3D binaries
-appeared serial. Numba times were single full-solve measurements; FMM times were
-medians of three full solves after warmup. The crossover depends on source and
-target counts, geometry, accuracy, hardware, threading and the FMM build; these
-measured counts are not a universal threshold.
+## 
 
 ## Shared FMM3D dependency
 
@@ -333,6 +317,24 @@ save raw samples, summaries, configuration and provenance under unique names.
 Run separate MATLAB processes for different thread settings; the driver does not
 change thread settings. This comparison and benchmark profiles are not run by
 the correctness suite.
+
+## Performance compared with direct Numba evaluation
+
+The number of sources must be sufficiently large, with enough target evaluations,
+for the FMM to outperform the compiled direct Blake velocity kernel in
+[RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall).
+For small and moderate problems, its Numba kernel (with zero source and target
+radii for point forces) can be faster because direct summation avoids FMM tree
+construction and the overhead of the two FMM calls.
+
+In a measured Python comparison with equal source/target counts and FMM tolerance
+`1e-8`, FMM first overtook one-thread Numba at 32,768 sources and targets. At
+131,072 of each, FMM took 40.5 s versus 158.3 s for one-thread Numba; eight-thread
+Numba and FMM were near parity at 39.0 s and 40.4 s. The loaded FMM3D binaries
+appeared serial. Numba times were single full-solve measurements; FMM times were
+medians of three full solves after warmup. The crossover depends on source and
+target counts, geometry, accuracy, hardware, threading and the FMM build; these
+measured counts are not a universal threshold.
 
 ## Limitations
 
