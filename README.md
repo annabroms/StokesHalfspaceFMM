@@ -10,38 +10,52 @@ The independent direct reference implements J. R. Blake, “A note on the image
 system for a stokeslet in a no-slip boundary,” Proc. Cambridge Philos. Soc. 70
 (1971), 303–310, [equation (16)](https://doi.org/10.1017/S0305004100049902).
 
-MATLAB evaluation of Stokes flow above an infinite stationary no-slip wall,
+MATLAB and Python evaluation of Stokes flow above an infinite stationary no-slip wall,
 using the paper's half-space image representation with a Papkovich–Neuber
 correction. This representation can be evaluated directly or with two calls to
 the external FMM3D library. An independently implemented direct Blake tensor
-provides a reference. Pressure, target velocity gradients and complete traction
-are also available through `blake.fields`.
+provides a reference. Both interfaces preserve component-first `3 x N` arrays,
+return physical velocity and evaluate raw wall residuals. The MATLAB interface
+also provides pressure, target velocity gradients and complete traction through
+`blake.fields`.
 
-## Python velocity
+## Performance compared with direct Numba evaluation
 
-The Python package provides physical Blake velocity using two existing
-`fmm3dpy` wrappers: one Stokes call for the physical and reflected forces, and
-one Laplace charge/dipole call for the Papkovich–Neuber correction. It also
-provides an independent blocked direct Blake tensor reference. Both preserve
-component-first `(3, N)` arrays and evaluate raw wall residuals.
+The number of sources must be sufficiently large, with enough target evaluations,
+for the FMM to outperform the compiled direct Blake velocity kernel in
+[RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall).
+For small and moderate problems, its Numba kernel (with zero source and target
+radii for point forces) can be faster because direct summation avoids FMM tree
+construction and the overhead of the two FMM calls.
 
-From the repository root, using the Python interpreter with NumPy and your
-existing `fmm3dpy` installation:
+In a measured Python comparison with equal source/target counts and FMM tolerance
+`1e-8`, FMM first overtook one-thread Numba at 32,768 sources and targets. At
+131,072 of each, FMM took 40.5 s versus 158.3 s for one-thread Numba; eight-thread
+Numba and FMM were near parity at 39.0 s and 40.4 s. The loaded FMM3D binaries
+appeared serial. Numba times were single full-solve measurements; FMM times were
+medians of three full solves after warmup. The crossover depends on source and
+target counts, geometry, accuracy, hardware, threading and the FMM build; these
+measured counts are not a universal threshold.
 
-```bash
-PYTHONPATH=python OMP_NUM_THREADS=1 python3 python/tests/run_tests.py
-PYTHONPATH=python OMP_NUM_THREADS=1 python3 examples/validate_velocity.py --output results/python_validation.json
-```
+## Shared FMM3D dependency
 
-See [Python usage and numerical conventions](docs/python.md) and the
-[measured Python verification record](docs/python-validation.md).
+The MATLAB and Python wrappers use the same underlying FMM3D Fortran
+implementation. The default velocity evaluation makes one Stokes call for the
+physical and reflected forces, followed by one Laplace charge/dipole call for
+the Papkovich–Neuber correction.
 
-## MATLAB setup
+Build FMM3D and the interfaces you need following its
+[installation instructions](https://fmm3d.readthedocs.io/en/latest/install.html).
+Use the updated FMM3D implementation: its Stokes driver requests Laplace
+gradients only for velocity/pressure, and skips source evaluation for
+target-only calls. After updating the shared Fortran source, rebuild each
+language interface you use so that both wrappers pick up the changes.
 
-Tested with MATLAB R2025a on Ubuntu 22.04.5 LTS (Linux x86-64); FMM evaluation requires
-a compiled FMM3D MATLAB installation. Direct evaluation requires no external
-library or additional MATLAB toolbox. Build FMM3D following its own instructions:
-<https://fmm3d.readthedocs.io/en/latest/install.html>.
+## Matlab setup
+
+Tested with MATLAB R2025a on Ubuntu 22.04.5 LTS (Linux x86-64). Select the
+compiled MATLAB interface to the FMM3D installation described above. Direct
+evaluation requires no external library or additional MATLAB toolbox.
 
 From the repository folder, run:
 
@@ -67,9 +81,7 @@ addpath('matlab');
 manifest = blake.setup('/path/to/FMM3D/matlab');
 ```
 
-Use the updated FMM3D build: its Stokes driver requests Laplace gradients
-only for velocity/pressure, and skips source evaluation for target-only calls.
-After changing that Fortran source, rebuild its MATLAB interface:
+To rebuild the MATLAB interface after an FMM3D update:
 
 ```bash
 make -C ../FMM3D/FMM3D matlab
@@ -85,7 +97,29 @@ wrappers and the MEX resolve to one directory. See
 [dependencies and the tested system](docs/dependencies.md) for requirements,
 installation guidance and reproducibility information.
 
-## Velocity
+## Python setup
+
+Use Python 3.10 or newer with NumPy and the compiled `fmm3dpy` interface to the
+same FMM3D implementation. Direct evaluation requires only NumPy. Select the
+Python interpreter that imports your intended installation:
+
+```bash
+python3 -c 'import sys, numpy, fmm3dpy; print(sys.executable); print(numpy.__version__); print(fmm3dpy.__file__)'
+```
+
+From the repository root, set `PYTHONPATH=python` to import this repository's
+`blake` package. For example, run the correctness tests and validation driver:
+
+```bash
+PYTHONPATH=python OMP_NUM_THREADS=1 python3 python/tests/run_tests.py
+PYTHONPATH=python OMP_NUM_THREADS=1 python3 examples/validate_velocity.py --output results/python_validation.json
+```
+
+See [Python usage and numerical conventions](docs/python.md) for velocity
+examples, and the [measured Python verification record](docs/python-validation.md)
+for accuracy results.
+
+## Matlab velocity
 
 ```matlab
 sources = [0 0.5; 0 0.2; 1 0.7];   % 3 x Ns
