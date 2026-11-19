@@ -14,7 +14,9 @@ Both interfaces use component-first `3 x N` arrays and return physical velocity.
 ## What is supported, compared with STKFMM
 
 All rows are quantities above a no-slip wall. "Direct" means blocked O(Ns*Nt)
-summation. The STKFMM column covers its wall class `StkWallFMM`.
+summation. The STKFMM column covers the wall class `StkWallFMM` in
+[STKFMM](https://github.com/annabroms/STKFMM/tree/local_python), as on the
+`local_python` branch of this fork at commit `1cea52a`.
 
 | Quantity above the wall | MATLAB FMM | MATLAB direct | Python FMM | Python direct | STKFMM `StkWallFMM` |
 |---|:-:|:-:|:-:|:-:|:-:|
@@ -245,7 +247,7 @@ and [OpenMP build/verification instructions](docs/dependencies.md#python-binding
 
 ### FMM3D versus STKFMM with a wall
 
-[STKFMM](https://github.com/wenyan4work/STKFMM)'s `StkWallFMM` class (on its
+[STKFMM](https://github.com/wenyan4work/STKFMM/tree/master)'s `StkWallFMM` class (on its
 `master` branch) evaluates the same wall Stokeslet velocity with PVFMM. It runs
 a Stokeslet FMM over physical and reflected sources plus two Laplace FMMs;
 this repository's default path makes two FMM3D calls. STKFMM requires the wall

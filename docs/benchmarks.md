@@ -72,11 +72,12 @@ the correctness suite.
 
 ## Performance compared with STKFMM's wall FMM (2026-11-19)
 
-[STKFMM](https://github.com/wenyan4work/STKFMM) (W. Yan and M. Shelley,
-PVFMM-based, Apache-2.0) provides `StkWallFMM`, a Stokeslet and RPY FMM above
-a no-slip wall at `z = 0` of its box. The class is on STKFMM's `master` branch;
-no special branch is needed. The local checkout used here is branch
-`local_python` (commit `1cea52a`), which adds only a local Python build guide.
+[STKFMM](https://github.com/wenyan4work/STKFMM/tree/master) (W. Yan and
+M. Shelley, PVFMM-based, Apache-2.0) provides `StkWallFMM`, a Stokeslet and
+RPY FMM above a no-slip wall at `z = 0` of its box. The class is on STKFMM's
+`master` branch (commit `56bfce3`); no special branch is needed. The local
+checkout used here is branch `local_python` (commit `1cea52a`), one commit on
+top of that `master` that adds only a local Python build guide.
 For `KERNEL.Stokes`, `StkWallFMM` runs three PVFMM evaluations:
 
 1. A Stokeslet FMM over the physical and reflected sources, with negated
