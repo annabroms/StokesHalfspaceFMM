@@ -150,30 +150,46 @@ describe the measured tradeoffs and how to reproduce a performance study.
 
 ### OpenMP FMM versus direct Numba
 
-With sufficiently large source and target counts, FMM outperforms the direct
-Numba Blake kernel in [RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall).
-The default Python proximity guard uses Numba bins with parallel target
-queries. Measurements on 2026-11-17 on an AMD Ryzen 7 PRO 8840HS used verified OpenMP
-bindings and **eight threads for both evaluators**. Prepared-evaluation times
-in seconds include the complete guard, packing, both FMM calls and assembly:
+The optimized point-force Blake kernel in
+[RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall) substantially
+reduces the direct cost. The rerun retains the earlier geometry distribution on an
+AMD Ryzen 7 PRO 8840HS, with verified **eight threads for both evaluators**.
+Prepared-evaluation times in seconds include the FMM proximity guard, packing,
+both native calls and assembly; correction and diagnostics are off:
 
-| Ns = Nt | Direct Numba | FMM, tol 1e-6 | Speedup | FMM, tol 1e-8 | Speedup |
-|---:|---:|---:|---:|---:|---:|
-| 4,096 | 0.0471 | 0.2465 | 0.191x | 0.5343 | 0.0881x |
-| 32,768 | 2.594 | 1.310 | **1.98x** | 2.835 | 0.915x |
-| 131,072 | 40.455 | 5.914 | **6.84x** | 11.560 | **3.50x** |
+| Direct kernel / measurement date | Ns = Nt | Direct Numba | FMM, tol 1e-6 | Speedup | FMM, tol 1e-8 | Speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| General / 2026-11-17 | 4,096 | 0.0471 | 0.2465 | 0.191x | 0.5343 | 0.0881x |
+| General / 2026-11-17 | 32,768 | 2.594 | 1.310 | **1.98x** | 2.835 | 0.915x |
+| General / 2026-11-17 | 131,072 | 40.455 | 5.914 | **6.84x** | 11.560 | **3.50x** |
+| Optimized / 2026-11-18 | 4,096 | 0.004442 | 0.1961 | 0.0227x | 0.4331 | 0.0103x |
+| Optimized / 2026-11-18 | 32,768 | 0.3320 | 1.049 | 0.316x | 2.269 | 0.146x |
+| Optimized / 2026-11-18 | 131,072 | 5.873 | 5.060 | **1.16x** | 10.199 | 0.576x |
+| Optimized / 2026-11-18 | 1,000,000 | 855 | Out of memory | — | Not timed | — |
 
 Speedup is direct Numba time divided by FMM time; values above one favor FMM.
-Direct Numba remains faster at the smallest count; the crossover depends on
-geometry, tolerance, hardware and threading.
+Among completed cases, FMM wins against optimized Numba only at 131,072 points
+and `tol=1e-6`. At that size and `tol=1e-8`, optimized Numba is **1.74x faster**.
+The crossover depends on geometry, tolerance, hardware and threading.
 
-Direct Numba entries are single full-solve measurements; FMM entries are
-medians of three full solves after warmup, excluding compilation. Both compute
-every target velocity. At the largest size, sampled FMM relative errors against
+At one million points, the OS killed the first FMM warmup for lack of memory.
+Subsequent checks with a 12 GiB memory limit failed at both tolerances; no FMM
+speedup was measured. The direct median is **14.2 minutes**, rounded to seconds.
+
+FMM required substantially more memory for this case: about **0.6 GiB** observed
+for the Numba benchmark process, versus **17.6 GiB** for FMM when killed.
+Much of the additional FMM storage holds multipole, local and plane-wave
+expansions for the tree boxes; its size depends on tolerance and tree structure.
+
+Historical direct entries are single full solves; reported new timings and historical
+FMM timings are medians of three full solves after warmup, excluding compilation.
+Completed solves compute every target velocity. At 131,072 points, sampled FMM
+relative errors against
 an independent direct sum are **3.63e-6** at `1e-6` and **5.00e-9** at `1e-8`;
 native FMM tolerance does not guarantee relative accuracy of the assembled wall
-field. All comparison checks, **22 Python acceptance tests** and the full MATLAB
-regression suite passed. See [methods, accuracy and provenance](docs/benchmarks.md#performance-compared-with-direct-numba-evaluation),
+field. The smaller comparison cases, **22 Python acceptance tests** and the full
+MATLAB regression suite passed; the million-point FMM case remains incomplete.
+See [methods, accuracy and provenance](docs/benchmarks.md#performance-compared-with-direct-numba-evaluation),
 [guard dependency and thread controls](docs/python.md#parallel-proximity-guard),
 and [OpenMP build/verification instructions](docs/dependencies.md#python-bindings-with-openmp).
 
