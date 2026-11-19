@@ -1,10 +1,8 @@
 # Numerical development
 
-This repository is independent of the MFS repositories. Do not add an MFS
-dependency or edit the external FMM3D installation.
+This repository is independent of the MFS repositories. Do not edit the external FMM3D installation.
 
-Preserve component-first 3-by-N arrays, physical velocity units and explicit
-coincidence errors. Keep direct Blake velocity and derivative references
+Preserve component-first 3-by-N arrays and physical velocity units. Keep direct Blake velocity and derivative references
 independent of the half-space image representation with its Papkovich–Neuber
 correction. Attribute the representation to all three authors. Never zero computed wall residuals.
 Do not introduce dense Ns-by-Nt interaction storage or finite differences in
