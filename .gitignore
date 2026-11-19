@@ -7,7 +7,7 @@ results/*
 /docs/dependencies.local.md
 
 # Local native objects and exact build provenance
-/native/build/
+/source/build/
 
 # Python build and interpreter artifacts
 __pycache__/

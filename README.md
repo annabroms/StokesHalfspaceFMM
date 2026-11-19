@@ -196,10 +196,16 @@ Small correctness cases do not establish large-system performance.
 [Benchmark profiles, timing definitions and the direct Numba comparison](docs/benchmarks.md)
 describe the measured tradeoffs and how to reproduce a performance study.
 
+The Python comparisons with direct Numba and STKFMM also need a checkout of the
+[`faster_mobility` branch of RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall/tree/faster_mobility)
+next to this repository, and `fmm3dpy` built with OpenMP. Each run takes
+`--threads 1` or `--threads 8` and checks that the threads are applied before
+timing. [Setup and commands for another machine](docs/benchmarks.md#running-the-python-benchmarks-on-another-machine).
+
 ### OpenMP FMM versus direct Numba
 
-The optimized point-force Blake kernel in
-[RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall) substantially
+The optimized point-force Blake kernel on the `faster_mobility` branch of
+[RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall/tree/faster_mobility) substantially
 reduces the direct cost. The rerun retains the earlier geometry distribution on an
 AMD Ryzen 7 PRO 8840HS, with verified **eight threads for both evaluators**.
 Prepared-evaluation times in seconds include the FMM proximity guard, packing,

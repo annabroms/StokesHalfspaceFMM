@@ -2,8 +2,21 @@
 
 [Back to the main README](../README.md)
 
-## Benchmarks
+## Contents
 
+- [MATLAB benchmarks](#matlab-benchmarks): only this repository and FMM3D's
+  MATLAB interfaces are needed.
+- [Running the Python benchmarks on another machine](#running-the-python-benchmarks-on-another-machine):
+  set up and run the comparisons with direct Numba and with STKFMM at one or
+  eight threads.
+- [STKFMM results](#performance-compared-with-stkfmms-wall-fmm-2026-11-19) and
+  [direct Numba results](#performance-compared-with-direct-numba-evaluation).
+
+## MATLAB benchmarks
+
+These drivers need only this repository and a compiled FMM3D MATLAB interface,
+selected as described in [dependencies](dependencies.md#setup): a sibling
+`../FMM3D` checkout, or the `FMM3D_MATLAB` environment variable.
 Launch a fresh MATLAB process for each thread setting, for example:
 
 ```bash
@@ -69,6 +82,155 @@ save raw samples, summaries, configuration and provenance under unique names.
 Run separate MATLAB processes for different thread settings; the driver does not
 change thread settings. This comparison and benchmark profiles are not run by
 the correctness suite.
+
+## Running the Python benchmarks on another machine
+
+Two Python drivers compare this repository's FMM with other codes:
+
+- [`compare_optimized_numba.py`](../benchmarks/compare_optimized_numba.py)
+  compares against the optimized direct Numba Blake kernel.
+- [`compare_stkfmm_wall.py`](../benchmarks/compare_stkfmm_wall.py) compares
+  against STKFMM's `StkWallFMM`.
+
+Both read the direct Numba kernel and the shared test geometry from the
+**`faster_mobility` branch** of
+[RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall/tree/faster_mobility).
+The `blake` package and its tests do not need that repository.
+
+### What you need
+
+| Checkout | Where to get it | Used by |
+|---|---|---|
+| StokesHalfspaceFMM | [annabroms/StokesHalfspaceFMM](https://github.com/annabroms/StokesHalfspaceFMM) | Both drivers |
+| RigidMultiblobsWall | Branch `faster_mobility` of [annabroms/RigidMultiblobsWall](https://github.com/annabroms/RigidMultiblobsWall/tree/faster_mobility); documented results use commit `799fbec` | Both drivers: `mobility/blake_numba.py` (direct kernel) and `faster_mobility/blakeComparison.py` (geometry, reference checks, OpenMP inspection) |
+| FMM3D | [flatironinstitute/FMM3D](https://github.com/flatironinstitute/FMM3D); documented results use commit `0e13b3d` | Building `fmm3dpy` with OpenMP |
+| STKFMM | Branch `local_python` of [annabroms/STKFMM](https://github.com/annabroms/STKFMM/tree/local_python) | STKFMM comparison only |
+
+You also need Linux, Python 3.10 or newer, `gfortran`, a C compiler and
+`git`. The drivers were tested only on Linux. The STKFMM worker needs Linux
+because it loads `libgomp.so.1`.
+
+### 1. Clone the repositories side by side
+
+```bash
+mkdir halfspace-benchmarks && cd halfspace-benchmarks
+git clone https://github.com/annabroms/StokesHalfspaceFMM.git
+git clone --branch faster_mobility https://github.com/annabroms/RigidMultiblobsWall.git
+git clone https://github.com/flatironinstitute/FMM3D.git
+# Optional: use the exact revisions of the documented results.
+git -C RigidMultiblobsWall checkout 799fbec
+git -C FMM3D checkout 0e13b3d
+```
+
+The drivers look for `../RigidMultiblobsWall` and `../STKFMM` next to this
+repository. If your checkouts are elsewhere, pass `--rigid-root` and
+`--stkfmm-root`. Nothing in RigidMultiblobsWall needs to be compiled.
+
+### 2. Create a Python environment with OpenMP FMM3D bindings
+
+From `halfspace-benchmarks/`:
+
+```bash
+python3 -m venv .venv-bench
+source .venv-bench/bin/activate
+python -m pip install --upgrade pip
+python -m pip install numpy numba meson-python ninja
+python -m pip wheel --no-deps --no-build-isolation \
+    -Csetup-args=-Dfortran_args=-fopenmp \
+    -Csetup-args=-Dfortran_link_args=-fopenmp \
+    -Csetup-args=-Dc_link_args=-fopenmp \
+    --wheel-dir wheels ./FMM3D
+python -m pip install --no-deps --force-reinstall wheels/fmm3dpy-*.whl
+```
+
+The `-fopenmp` flags are required. Without them `fmm3dpy` runs on one thread,
+whatever `OMP_NUM_THREADS` says. See
+[Python bindings with OpenMP](dependencies.md#python-bindings-with-openmp)
+for how to check the installed extensions by hand.
+
+### 3. Check the setup
+
+From `halfspace-benchmarks/StokesHalfspaceFMM/`, with the environment active:
+
+```bash
+python benchmarks/rigid_multiblobs.py
+PYTHONPATH=python OMP_NUM_THREADS=1 python python/tests/run_tests.py
+python benchmarks/compare_optimized_numba.py --threads 1 --sizes 1024 \
+    --output results/smoke_numba_t1
+python benchmarks/compare_optimized_numba.py --threads 8 --sizes 1024 \
+    --output results/smoke_numba_t8
+```
+
+The first command checks that RigidMultiblobsWall is on `faster_mobility`.
+The two small runs take a few seconds each. Each should end with
+`accuracy passed`.
+
+### 4. Run timings at one or eight threads
+
+`--threads` sets the thread count for each run. Before importing NumPy, Numba
+or `fmm3dpy`, the driver sets `OMP_NUM_THREADS` and `NUMBA_NUM_THREADS` to
+that value. It also sets `OMP_DYNAMIC=FALSE` and limits BLAS to one thread.
+Before timing, it checks that Numba and both `fmm3dpy` extensions (Stokes and
+Laplace) report the requested limit, and stops if they do not. An `fmm3dpy`
+built without OpenMP is accepted only with `--threads 1`.
+
+You do not need to set any thread environment variables yourself. Run each
+thread count as a separate command, with its own output directory:
+
+```bash
+for t in 1 8; do
+    python benchmarks/compare_optimized_numba.py --threads $t \
+        --sizes 4096 32768 131072 --tolerances 1e-6 1e-8 --repeats 3 \
+        --output results/optimized_numba_t$t
+done
+```
+
+The 131,072-point case takes most of the time, especially at one thread. Try
+smaller `--sizes` first. The thread check confirms the configured limit, not
+how many cores the machine has. Use `--threads 8` only on a machine with at
+least eight physical cores, or the timings will be oversubscribed.
+
+### 5. Optional: the STKFMM comparison
+
+```bash
+cd halfspace-benchmarks
+git clone --branch local_python https://github.com/annabroms/STKFMM.git
+```
+
+Build STKFMM by following `STKFMM/Python/README.md` on that branch. The build
+must produce `STKFMM/build/conda/bin/python` and
+`STKFMM/build/local/lib/python/PySTKFMM.py`. Then run, from this repository
+in the environment from step 2:
+
+```bash
+for t in 1 8; do
+    python benchmarks/compare_stkfmm_wall.py --threads $t \
+        --sizes 4096 32768 131072 --tolerances 1e-6 1e-8 \
+        --orders 8 10 12 14 --max-pts 500 --repeats 3 \
+        --output results/stkfmm_wall_t$t
+done
+```
+
+The driver times FMM3D in the current interpreter. It then starts STKFMM's own
+interpreter as a worker with the same `--threads`. The worker checks STKFMM's
+OpenMP limit and confirms that it used identical inputs. For a quick check,
+use `--sizes 1024 --tolerances 1e-6 --orders 8`.
+
+### Outputs and provenance
+
+Each run writes `comparison.json` and `comparison.csv` to its `--output`
+directory under the git-ignored `results/` folder. The JSON contains:
+
+- every timing sample;
+- accuracy checks against the independent direct Blake sum;
+- the CPU, package versions and thread settings;
+- the OpenMP evidence for each loaded `fmm3dpy` extension;
+- the branch, commit and uncommitted-change state of each external checkout.
+
+The driver prints a warning, but still runs, if RigidMultiblobsWall is not at
+the tested `faster_mobility` commit `799fbec` or has uncommitted changes.
+Record the geometry, tolerance, thread count and dependency revisions along
+with any timings you report.
 
 ## Performance compared with STKFMM's wall FMM (2026-11-19)
 
@@ -239,8 +401,10 @@ RAM).
 - **FMM3D side:** the RigidMultiblobsWall experiment interpreter, with Python
   3.10.12, NumPy 2.2.6, Numba 0.65.1 and FMM3D 2.1.0 OpenMP bindings. Both
   loaded Stokes and Laplace extensions report `omp_get_max_threads()==8`. This
-  repository was at commit `0eb58ec`; the fixture came from RigidMultiblobsWall
-  `faster_mobility` at commit `8d41e46`.
+  repository was at commit `0eb58ec`. The fixture came from the RigidMultiblobsWall
+  `faster_mobility` checkout, which then reported commit `8d41e46` because its
+  benchmark files were not yet committed. They are now in `faster_mobility`
+  commit `799fbec`, the revision the drivers expect.
 - **STKFMM side:** STKFMM's local conda build, with Python 3.11.18, NumPy
   2.4.6, mpi4py 4.1.2, Open MPI 5.0.11, FFTW 3.3.11 and OpenBLAS, built with
   GCC 13 in Release mode. PVFMM was revision `b9de1ad` with
@@ -252,18 +416,21 @@ The fixture and seeds (1927, 1928, 1929) match the
 coordinates in the unit square, source heights `[0.2,0.4]`, target heights
 `[0.1,1.1]`, wall height 0 and viscosity 1.
 
-Reproduce from this repository root:
+Reproduce from this repository root, in the environment from
+[Running the Python benchmarks on another machine](#running-the-python-benchmarks-on-another-machine).
+The original run used the interpreter `faster_mobility/.venv-blakeComparison`
+in the RigidMultiblobsWall checkout instead.
 
 ```bash
-../RigidMultiblobsWall/faster_mobility/.venv-blakeComparison/bin/python \
-    benchmarks/compare_stkfmm_wall.py --threads 8 --sizes 4096 32768 131072 \
+python benchmarks/compare_stkfmm_wall.py --threads 8 --sizes 4096 32768 131072 \
     --tolerances 1e-6 1e-8 --orders 8 10 12 14 --max-pts 500 --repeats 3 \
     --output results/stkfmm_wall_20261119
 ```
 
 `--stkfmm-root` (default `../STKFMM`) must contain the local build described
-in `STKFMM/Python/README.md`. `--rigid-root` selects the RigidMultiblobsWall
-checkout. Raw [JSON](../results/stkfmm_wall_20261119/comparison.json) and
+in `STKFMM/Python/README.md` on branch `local_python`. `--rigid-root` (default
+`../RigidMultiblobsWall`) selects the checkout of branch `faster_mobility`.
+Raw [JSON](../results/stkfmm_wall_20261119/comparison.json) and
 [CSV](../results/stkfmm_wall_20261119/comparison.csv) files, with all samples,
 phase times, validation records and both interpreters' provenance, are saved
 under the git-ignored `results/` directory.
@@ -359,11 +526,11 @@ The [recovered record](../results/optimized_numba_1million_20261118/comparison.j
 contains the rounded direct timings, sampled accuracy, allocation diagnostics
 and dependency provenance. The benchmark now checkpoints completed direct
 measurements before entering FMM, preserving exact samples on future failures.
-Reproduce the full attempt from this repository root with:
+Reproduce the full attempt from this repository root with the command below.
+The FMM process was killed at 17.6 GiB, so it needs more free memory than that:
 
 ```bash
-../RigidMultiblobsWall/faster_mobility/.venv-blakeComparison/bin/python \
-    benchmarks/compare_optimized_numba.py --threads 8 --sizes 1000000 \
+python benchmarks/compare_optimized_numba.py --threads 8 --sizes 1000000 \
     --tolerances 1e-6 1e-8 --repeats 3 \
     --output results/optimized_numba_1million_20261118
 ```
@@ -378,12 +545,16 @@ kernel explicitly; the sibling experiment's original driver still selects the
 general kernel. No production evaluator or external dependency was changed.
 
 **External requirement.** This benchmark, unlike the `blake` package and its
-tests, needs a local RigidMultiblobsWall checkout. Its `mobility` package
-supplies the direct comparator, and `faster_mobility/blakeComparison.py`
-supplies the fixture, independent validation, error metrics and OpenMP checks.
-The driver looks for `../RigidMultiblobsWall` by default; `--rigid-root`
-selects another checkout. If either file is missing, it stops before any numerical
-work. The JSON records the checkout and file paths used.
+tests, needs a local checkout of RigidMultiblobsWall's
+[`faster_mobility` branch](https://github.com/annabroms/RigidMultiblobsWall/tree/faster_mobility).
+Its `mobility` package supplies the direct comparator, and
+`faster_mobility/blakeComparison.py` supplies the fixture, independent
+validation, error metrics and OpenMP checks. The driver looks for
+`../RigidMultiblobsWall` by default; `--rigid-root` selects another checkout.
+If either file is missing, it stops before any numerical work and prints the
+`git clone` command. The JSON records the checkout's paths, branch and commit.
+These runs used files that were committed afterwards as `faster_mobility`
+commit `799fbec`.
 The main README retains both runs in [one table](../README.md#openmp-fmm-versus-direct-numba).
 
 Prepared-evaluation medians in seconds, with **eight threads for both methods**:
@@ -449,17 +620,17 @@ Laplace extensions verify `omp_get_max_threads()==8`. Dynamic OpenMP teams
 are disabled and BLAS is limited to one thread. The JSON records dependency
 locations, versions, thread settings, checks and all timing samples.
 
-Reproduce from this repository root using the existing experiment interpreter:
+Reproduce from this repository root, in the environment from
+[Running the Python benchmarks on another machine](#running-the-python-benchmarks-on-another-machine).
+Use `--threads 1` for a one-thread run:
 
 ```bash
-../RigidMultiblobsWall/faster_mobility/.venv-blakeComparison/bin/python \
-    benchmarks/compare_optimized_numba.py --threads 8 \
+python benchmarks/compare_optimized_numba.py --threads 8 \
     --sizes 4096 32768 131072 --tolerances 1e-6 1e-8 --repeats 3 \
     --output results/optimized_numba_20261118
 ```
 
-Use `--rigid-root` to select another checkout containing the optimized kernel
-and original validation driver. The comparison sets thread controls before
+Use `--rigid-root` to select another `faster_mobility` checkout. The comparison sets thread controls before
 importing numerical libraries and checks both native runtime limits before
 timing. Raw [JSON](../results/optimized_numba_20261118/comparison.json) and
 [CSV](../results/optimized_numba_20261118/comparison.csv) are saved under ignored
@@ -539,21 +710,21 @@ threads; both loaded native extensions report `omp_get_max_threads()==8`.
 BLAS is limited to one thread and dynamic OpenMP teams are disabled. Build
 settings are recorded in the earlier provenance section below.
 
-From the sibling RigidMultiblobsWall checkout:
+This run used RigidMultiblobsWall's own driver, which times the general
+kernel. Run it from a RigidMultiblobsWall checkout of `faster_mobility`, in the
+same environment plus SciPy and Matplotlib:
 
 ```bash
-faster_mobility/.venv-blakeComparison/bin/python faster_mobility/blakeComparison.py \
+python faster_mobility/blakeComparison.py \
     --sizes 4096 32768 131072 --threads 8 --tolerances 1e-6 1e-8 \
     --repeats 3 --direct-repeats 1 --balanced-only --paired-timings \
     --require-openmp --output faster_mobility/results/blakeComparison-numba-guard
 ```
 
-See the sibling experiment's
-[full report](../../RigidMultiblobsWall/faster_mobility/blakeComparison-results.md),
-[updated plots](../../RigidMultiblobsWall/faster_mobility/results/blakeComparison-numba-guard/blakeComparison.png),
-[CSV](../../RigidMultiblobsWall/faster_mobility/results/blakeComparison-numba-guard/blakeComparison.csv),
-and [raw JSON](../../RigidMultiblobsWall/faster_mobility/results/blakeComparison-numba-guard/blakeComparison.json).
-Generated outputs remain in ignored experiment directories and can be recreated
+See the experiment's
+[full report](https://github.com/annabroms/RigidMultiblobsWall/blob/faster_mobility/faster_mobility/blakeComparison-results.md).
+Its plots, CSV and raw JSON are written to the git-ignored
+`faster_mobility/results/blakeComparison-numba-guard/` and can be recreated
 with the command above. Earlier measurements below retain the serial Python
 guard and are historical.
 
@@ -639,10 +810,10 @@ The verified wheel was installed into both the experiment environment and the
 user Python environment; source and MATLAB installations were left unchanged.
 ### Reproduce the comparison
 
-From the sibling RigidMultiblobsWall checkout containing the experiment driver:
+From a RigidMultiblobsWall checkout of `faster_mobility`:
 
 ```bash
-faster_mobility/.venv-blakeComparison/bin/python faster_mobility/blakeComparison.py \
+python faster_mobility/blakeComparison.py \
     --sizes 4096 32768 131072 --threads 1 8 --tolerances 1e-8 \
     --repeats 3 --direct-repeats 1 --balanced-only --paired-timings \
     --require-openmp --output faster_mobility/results/blakeComparison-openmp

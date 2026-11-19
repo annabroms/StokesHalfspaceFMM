@@ -2,9 +2,13 @@
 
 This is a cross-repository benchmark, not part of the ``blake`` package. The
 direct comparator and the shared fixture/validation helpers come from a local
-checkout of RigidMultiblobsWall (https://github.com/annabroms/RigidMultiblobsWall,
-GPL-3.0), selected with ``--rigid-root`` (default: a sibling directory
-``../RigidMultiblobsWall``). That checkout must provide:
+checkout of the ``faster_mobility`` branch of RigidMultiblobsWall
+(https://github.com/annabroms/RigidMultiblobsWall, GPL-3.0), selected with
+``--rigid-root`` (default: a sibling directory ``../RigidMultiblobsWall``)::
+
+    git clone --branch faster_mobility https://github.com/annabroms/RigidMultiblobsWall.git
+
+That checkout must provide:
 
 * ``mobility/blake_numba.py``: the specialized point-force Blake kernel
   ``_point_force_kernel`` used as the direct Numba comparator;
@@ -14,7 +18,8 @@ GPL-3.0), selected with ``--rigid-root`` (default: a sibling directory
 
 The interpreter must also provide NumPy, Numba, llvmlite and OpenMP-enabled
 ``fmm3dpy``; this repository's ``python/blake`` package is added to the path.
-Neither the package nor its tests import RigidMultiblobsWall.
+Neither the package nor its tests import RigidMultiblobsWall. Setup on a new
+machine is described in docs/benchmarks.md#running-the-python-benchmarks-on-another-machine.
 """
 
 import argparse
@@ -25,30 +30,14 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import platform
 from statistics import median
 import sys
 from time import perf_counter
 from types import SimpleNamespace
 
-RIGID_URL = "https://github.com/annabroms/RigidMultiblobsWall"
-RIGID_KERNEL = Path("mobility/blake_numba.py")
-RIGID_DRIVER = Path("faster_mobility/blakeComparison.py")
+import rigid_multiblobs as rigid
 
-
-def check_rigid_root(rigid_root):
-    """Fail before any numerical work unless the external RigidMultiblobsWall files exist."""
-    rigid_root = rigid_root.resolve()
-    missing = [str(rigid_root / name) for name in (RIGID_KERNEL, RIGID_DRIVER)
-               if not (rigid_root / name).is_file()]
-    if missing:
-        raise SystemExit(
-            "This benchmark needs a RigidMultiblobsWall checkout providing the direct "
-            f"Numba comparator and comparison driver ({RIGID_URL}).\nMissing:\n  "
-            + "\n  ".join(missing)
-            + "\nPass its location with --rigid-root."
-        )
-    return rigid_root
+RIGID_URL, RIGID_KERNEL, RIGID_DRIVER = rigid.URL, rigid.KERNEL, rigid.DRIVER
 
 
 def load_comparison(path):
@@ -90,9 +79,10 @@ def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--rigid-root", type=Path, default=root.parent / "RigidMultiblobsWall",
-                        help=f"RigidMultiblobsWall checkout ({RIGID_URL}) containing "
-                             f"{RIGID_KERNEL} and {RIGID_DRIVER} (default: %(default)s)")
+    parser.add_argument("--rigid-root", type=Path, default=rigid.DEFAULT_ROOT,
+                        help=f"RigidMultiblobsWall checkout of branch {rigid.BRANCH} "
+                             f"({RIGID_URL}) containing {RIGID_KERNEL} and {RIGID_DRIVER} "
+                             "(default: %(default)s)")
     parser.add_argument("--sizes", type=int, nargs="+", default=[4096, 32768, 131072])
     parser.add_argument("--tolerances", type=float, nargs="+", default=[1e-6, 1e-8])
     parser.add_argument("--threads", type=int, default=8)
@@ -103,7 +93,8 @@ def main():
         parser.error("Use positive counts/threads and at least three repetitions")
     if any(not 0 < tol < 1 for tol in args.tolerances):
         parser.error("Tolerances must lie strictly between zero and one")
-    rigid_root = check_rigid_root(args.rigid_root)
+    rigid_root = rigid.check_root(args.rigid_root)
+    rigid_checkout = rigid.describe_checkout(rigid_root)
     args.output.mkdir(parents=True, exist_ok=True)
     os.environ.update(OMP_NUM_THREADS=str(args.threads), NUMBA_NUM_THREADS=str(args.threads),
                       OMP_DYNAMIC="FALSE", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1",
@@ -132,17 +123,17 @@ def main():
     # Retain paths and runtime queries, without adding file fingerprints to reports.
     comparison.fingerprint = lambda path: {"path": str(Path(path).resolve())}
     openmp = comparison.inspect_fmm_openmp(Path(fmm3dpy.__file__).parent)
-    assert len(openmp["extensions"]) == 2
-    assert all(item.get("openmp_max_threads") == args.threads for item in openmp["extensions"])
-    assert numba.get_num_threads() == args.threads
+    rigid.require_fmm_threads(openmp, args.threads)
+    if numba.get_num_threads() != args.threads:
+        raise SystemExit(f"Numba reports {numba.get_num_threads()} threads, "
+                         f"expected {args.threads}")
     optimized.blake_velocity()
     validation = comparison.validate(
         np, blake, point_kernel, SimpleNamespace(seed=927, tolerances=args.tolerances)
     )
     print(f"Validated specialized kernel and FMM; verified {args.threads} threads in "
           "Numba and both OpenMP extensions", flush=True)
-    cpu = next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
-                if line.startswith("model name")), platform.processor())
+    cpu = rigid.cpu_model()
     report = dict(
         status="inProgress", timestamp_utc=datetime.now(timezone.utc).isoformat(),
         settings=dict(sizes=args.sizes, tolerances=args.tolerances, threads=args.threads,
@@ -162,7 +153,7 @@ def main():
             fmm_package=str(Path(fmm3dpy.__file__).resolve()),
             halfspace_package=str(Path(blake.__file__).resolve()),
             rigid_multiblobs_root=str(rigid_root), rigid_multiblobs_url=RIGID_URL,
-            original_driver=str(rigid_root / RIGID_DRIVER),
+            original_driver=str(rigid_root / RIGID_DRIVER), rigid_multiblobs=rigid_checkout,
             numba_threads=numba.get_num_threads(), numba_threading_layer=numba.threading_layer(),
             fmm_openmp=openmp,
             environment={key: os.environ.get(key) for key in

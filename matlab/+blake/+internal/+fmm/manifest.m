@@ -11,7 +11,7 @@ info=struct('matlab',version,'computer',computer, ...
     'available_fmm_backends',{{'two-call','one-call'}}, ...
     'onecall_mex_path',which('blake.internal.fmm.blake_onecall_mex'));
 info.onecall_build=[];
-build_file=fullfile(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))),'native','build','build.json');
+build_file=fullfile(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))),'source','build','build.json');
 if isfile(build_file), info.onecall_build=jsondecode(fileread(build_file)); end
 root=fileparts(fileparts(info.stokes_path));
 % Quote filesystem paths before passing them to read-only shell commands.

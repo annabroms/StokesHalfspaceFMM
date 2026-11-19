@@ -17,9 +17,12 @@ same sampled targets. STKFMM's wall kernel requires the box's lower z-face to be
 the wall and every point to lie in the lower half of its cubic box; its
 ``KERNEL.Stokes`` result contains 1/(8*pi) but not the viscosity.
 
-STKFMM sources (https://github.com/wenyan4work/STKFMM, Apache-2.0) and
-RigidMultiblobsWall (https://github.com/annabroms/RigidMultiblobsWall, GPL-3.0)
-are local checkouts selected with ``--stkfmm-root`` and ``--rigid-root``.
+STKFMM sources (https://github.com/wenyan4work/STKFMM, Apache-2.0; the local
+build guide is on branch ``local_python`` of https://github.com/annabroms/STKFMM)
+and the ``faster_mobility`` branch of RigidMultiblobsWall
+(https://github.com/annabroms/RigidMultiblobsWall, GPL-3.0) are local checkouts
+selected with ``--stkfmm-root`` and ``--rigid-root``. Setup on a new machine is
+described in docs/benchmarks.md#running-the-python-benchmarks-on-another-machine.
 """
 
 import argparse
@@ -31,14 +34,15 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import platform
 from statistics import median
 import subprocess
 import sys
 from time import perf_counter
 
+import rigid_multiblobs as rigid
+
 ROOT = Path(__file__).resolve().parents[1]
-RIGID_DRIVER = Path("faster_mobility/blakeComparison.py")
+RIGID_DRIVER = rigid.DRIVER
 STKFMM_PYTHON = Path("build/conda/bin/python")
 STKFMM_LIB = Path("build/local/lib")
 SEED_BASE = 1927
@@ -52,7 +56,9 @@ def arguments():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--stkfmm-root", type=Path, default=ROOT.parent / "STKFMM")
-    parser.add_argument("--rigid-root", type=Path, default=ROOT.parent / "RigidMultiblobsWall")
+    parser.add_argument("--rigid-root", type=Path, default=rigid.DEFAULT_ROOT,
+                        help=f"RigidMultiblobsWall checkout of branch {rigid.BRANCH} "
+                             "(default: %(default)s)")
     parser.add_argument("--sizes", type=int, nargs="+", default=[4096, 32768, 131072])
     parser.add_argument("--tolerances", type=float, nargs="+", default=[1e-6, 1e-8],
                         help="FMM3D requested tolerances")
@@ -239,21 +245,18 @@ def worker(args):
                         stkfmm_commit=git_head(args.stkfmm_root))))
 
 
-def git_head(path):
-    """Record a checkout's branch and commit, or None outside git."""
-    try:
-        run = lambda *a: subprocess.run(["git", "-C", str(path), *a], capture_output=True,
-                                        text=True, check=True).stdout.strip()
-        return dict(branch=run("rev-parse", "--abbrev-ref", "HEAD"), commit=run("rev-parse", "HEAD"))
-    except (OSError, subprocess.CalledProcessError):
-        return None
+git_head = rigid.git_record
 
 
 def stkfmm_environment(args):
     """Reproduce STKFMM/Python/use-local.sh for the worker with fixed thread controls."""
     root = args.stkfmm_root
     if not (root / STKFMM_PYTHON).is_file() or not (root / STKFMM_LIB / "python/PySTKFMM.py").is_file():
-        raise SystemExit(f"No local STKFMM build under {root}; see STKFMM/Python/README.md")
+        raise SystemExit(
+            f"No local STKFMM build under {root} (expected {STKFMM_PYTHON} and "
+            f"{STKFMM_LIB / 'python/PySTKFMM.py'}). Clone branch local_python of "
+            "https://github.com/annabroms/STKFMM, follow its Python/README.md, "
+            "or pass --stkfmm-root.")
     env = dict(os.environ)
     env.pop("PYTHONHOME", None)
     env.update(PYTHONPATH=str(root / STKFMM_LIB / "python"),
@@ -271,8 +274,8 @@ def main():
                       OMP_DYNAMIC="FALSE", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
     if args.worker:
         return worker(args)
-    if not (args.rigid_root / RIGID_DRIVER).is_file():
-        raise SystemExit(f"Missing {args.rigid_root / RIGID_DRIVER}; pass --rigid-root")
+    rigid.check_root(args.rigid_root, required=(RIGID_DRIVER,))
+    rigid_checkout = rigid.describe_checkout(args.rigid_root)
     env = stkfmm_environment(args)
     sys.path.insert(0, str(ROOT / "python"))
     import numpy as np
@@ -281,9 +284,8 @@ def main():
 
     comparison = load_module(args.rigid_root / RIGID_DRIVER, "rigid_blake_comparison")
     openmp = comparison.inspect_fmm_openmp(Path(fmm3dpy.__file__).parent)
-    assert all(item.get("openmp_max_threads") == args.threads for item in openmp["extensions"])
-    cpu = next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
-                if line.startswith("model name")), platform.processor())
+    rigid.require_fmm_threads(openmp, args.threads)
+    cpu = rigid.cpu_model()
     report = dict(
         status="inProgress", timestamp_utc=datetime.now(timezone.utc).isoformat(),
         settings={k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()
@@ -297,7 +299,7 @@ def main():
         provenance=dict(cpu=cpu, python=sys.version, executable=sys.executable,
                         packages={name: importlib.metadata.version(name)
                                   for name in ("numpy", "numba", "fmm3dpy")},
-                        halfspace_commit=git_head(ROOT), rigid_multiblobs=git_head(args.rigid_root),
+                        halfspace_commit=git_head(ROOT), rigid_multiblobs=rigid_checkout,
                         fmm_openmp=openmp),
         fmm3d_cases=[], stkfmm=None)
     for case, n in enumerate(args.sizes):
