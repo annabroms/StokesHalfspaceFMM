@@ -18,7 +18,7 @@ summation. The STKFMM column covers the wall class `StkWallFMM` in
 [STKFMM](https://github.com/annabroms/STKFMM/tree/local_python), as on the
 `local_python` branch of this fork at commit `1cea52a`.
 
-| Quantity above the wall | MATLAB FMM | MATLAB direct | Python FMM | Python direct | STKFMM `StkWallFMM` |
+| Quantity above the wall | MATLAB wrapped FMM | MATLAB direct | Python wrapped FMM | Python direct | STKFMM `StkWallFMM` |
 |---|:-:|:-:|:-:|:-:|:-:|
 | Stokeslet (point-force) velocity | Yes | Yes | Yes | Yes | Yes (`Stokes`) |
 | Pressure | Yes¹ | Yes | Yes | Yes | — |
@@ -31,10 +31,6 @@ summation. The STKFMM column covers the wall class `StkWallFMM` in
 ² Two-call backend only.
 ³ STKFMM lists `PX` and `PXY` support for both wall kernels. These modes need
 STKFMM's precomputed periodic data and were not tested here.
-
-STKFMM's free-space class `Stk3DFMM` has more kernels, such as pressure,
-velocity gradients, traction and double layers. These have **no wall
-correction** and are not equivalents of the rows above.
 
 Other differences:
 
