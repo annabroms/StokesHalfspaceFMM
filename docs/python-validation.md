@@ -5,6 +5,65 @@ The accelerated implementation uses the representation of Z. Gimbutas,
 L. Greengard and S. Veerapaneni; the comparison uses an independent Python
 implementation of Blake's original tensor. See [usage and conventions](python.md).
 
+## Pressure, velocity gradients and traction (2026-11-19)
+
+Python now evaluates pressure, velocity gradients and traction with both
+methods. See [usage](python.md#pressure-velocity-gradients-and-traction).
+
+**Test suite.** All **33 Python acceptance tests passed**: the 22 existing
+tests and 11 new tests in
+[test_fields.py](../python/tests/test_fields.py). None were skipped or
+incomplete. The run used `OMP_NUM_THREADS=1`, Python 3.10.12, NumPy 2.2.6,
+SciPy 1.15.3 and the user-installed `fmm3dpy` 2.1.0. The new tests cover:
+
+- **Blocked versus pair loops.** Blocked direct pressure and gradients agree
+  with readable pair loops for three block sizes, including targets on the
+  wall.
+- **Finite-difference diagnostics** (in tests only). Finite differences of
+  velocity converge to the analytic gradient at second order: error ratios
+  are about 100 per decade, and relative errors fall to 1.5e-9 at step 1e-5.
+  Differences of pressure and gradient satisfy `grad p = mu*laplacian(u)` to
+  1e-6.
+- **Physical identities.**
+  - Velocity gradients are divergence-free.
+  - At wall targets, tangential derivatives and `dw/dz` vanish, while the
+    computed shear rates stay nonzero.
+  - Traction matches the stress tensor applied to random unit normals.
+  - Pressure and traction are independent of viscosity; gradients scale as
+    `1/mu`.
+  - Under a length scaling `s`, pressure and gradients scale as `1/s^2`.
+  - Fields are unchanged when the wall and points are translated.
+- **FMM on a real tree.** With 1,200 sources and 19 targets, five of them on
+  the wall, `tol=1e-10` and `mu=1.7`, FMM velocity, pressure, gradients and
+  traction agree with direct Blake to 1e-8 relative. The tests also check the
+  FMM target flags.
+- **Near-wall correction** gives bitwise-direct fields at the selected targets.
+- **Errors and empty inputs.** Invalid requests and normals raise errors,
+  coincident points raise `SingularInteractionError`, and empty inputs keep
+  their output shapes.
+
+**Cross-language check.** MATLAB `blake.fields` and Python `blake.fields`
+were compared on identical inputs. The fixture has 1,500 sources at heights
+0.05–1.05 and 40 targets: six on the wall, four at height `1e-3`, and the rest
+at heights 0.02–1.02. It used `mu=1.7`, random unit normals and one thread.
+Relative differences between the two languages:
+
+| Method | Velocity | Pressure | Gradient | Traction |
+|---|---:|---:|---:|---:|
+| Direct Blake | 9.9e-16 | 1.1e-15 | 6.0e-16 | 1.2e-15 |
+| FMM, `tol=1e-10` | 0 | 0 | 4.9e-17 | 1.9e-16 |
+
+Python FMM accuracy against Python direct on the same fixture:
+
+| FMM tolerance | Velocity | Pressure | Gradient | Traction |
+|---|---:|---:|---:|---:|
+| `1e-6` | 1.0e-6 | 6.1e-7 | 4.4e-7 | 7.7e-7 |
+| `1e-10` | 2.5e-14 | 1.2e-15 | 4.1e-14 | 7.6e-14 |
+
+At the six wall targets, the largest tangential derivative computed by direct
+summation is 1.3e-14, against a largest gradient entry of 6.1e2. No MATLAB
+files were changed, and no benchmarks were run for the new fields.
+
 ## Acceptance checks
 
 - Python acceptance: **13 passed, 0 failed, 0 incomplete** in the final suite

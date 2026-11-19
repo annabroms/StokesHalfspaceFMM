@@ -70,6 +70,203 @@ Run separate MATLAB processes for different thread settings; the driver does not
 change thread settings. This comparison and benchmark profiles are not run by
 the correctness suite.
 
+## Performance compared with STKFMM's wall FMM (2026-11-19)
+
+[STKFMM](https://github.com/wenyan4work/STKFMM) (W. Yan and M. Shelley,
+PVFMM-based, Apache-2.0) provides `StkWallFMM`, a Stokeslet and RPY FMM above
+a no-slip wall at `z = 0` of its box. The class is on STKFMM's `master` branch;
+no special branch is needed. The local checkout used here is branch
+`local_python` (commit `1cea52a`), which adds only a local Python build guide.
+For `KERNEL.Stokes`, `StkWallFMM` runs three PVFMM evaluations:
+
+1. A Stokeslet FMM over the physical and reflected sources, with negated
+   lateral image forces.
+2. A Laplace FMM of charges and dipoles, returning potential and gradient.
+3. A Laplace FMM of charges, returning potential, gradient and Hessian.
+
+The default path in this repository makes two native FMM3D calls instead.
+
+### How STKFMM's wall kernel is called
+
+The [benchmark driver](../benchmarks/compare_stkfmm_wall.py) wraps
+`PySTKFMM.StkWallFMM` in a small adapter class, `WallSTKFMM`, with these steps:
+
+- **Construction.** `StkWallFMM(order, max_pts, PAXIS.NONE, KERNEL.Stokes)`
+  loads PVFMM's precomputed translation operators. Construction takes 0.6 s
+  at order 8 and up to 5 s at order 14. It is done once per order and is not
+  included in the timings.
+- **Box.** The wall must be the lower z-face of STKFMM's cubic box, and every
+  point must lie strictly inside the box's lower half after scaling. The
+  adapter sets `origin = [xmin - pad, ymin - pad, wall_height]` and a box
+  length of `max(lateral span, 2*(zmax - wall_height)) + 2*pad`, with
+  `pad = 1e-3 * span`. With target heights up to 1.1, the box length is about
+  2.2, although the lateral span is 1. Sources must lie strictly above the
+  wall; targets may lie on it.
+- **Evaluation.** The adapter calls `set_box`, `set_points` and `setup_tree`,
+  then `clear_fmm` and `evaluate_fmm`. Coordinates and forces are passed as
+  point-major, C-contiguous `N x 3` copies, with an empty double-layer array.
+  STKFMM's output contains `1/(8*pi)` but not the viscosity, so the physical
+  velocity is the output divided by `mu`, transposed back to `3 x Nt`.
+- **Tree reuse.** Calling `clear_fmm` and `evaluate_fmm` again applies new
+  forces to the existing trees. This repository's FMM3D path has no
+  equivalent; it rebuilds its trees on every call.
+
+STKFMM's Python environment provides mpi4py and PySTKFMM but not `fmm3dpy`.
+The driver therefore runs FMM3D in the experiment interpreter and starts a
+worker under STKFMM's interpreter, which sets the paths that
+`STKFMM/Python/use-local.sh` would set. Each interpreter hashes the inputs it
+generates, and the run fails unless the hashes are identical. The worker uses
+one MPI rank.
+
+### Results
+
+All times are medians, in seconds, of three complete evaluations after one
+warmup. Every evaluation computes the velocity at every target. Both codes
+used eight verified OpenMP threads. Errors are against this repository's
+independent direct Blake sum, over 256 evenly spaced targets and all sources.
+
+| Ns = Nt | Code and setting | Median (range) | Reused-tree median | Relative error | Normalized error |
+|---:|---|---:|---:|---:|---:|
+| 4,096 | FMM3D, tol 1e-6 | 0.178 (0.171–0.202) | — | 1.75e-6 | 7.8e-8 |
+| 4,096 | FMM3D, tol 1e-8 | 0.413 (0.410–0.462) | — | 2.27e-9 | 1.1e-10 |
+| 4,096 | STKFMM, order 8 | 0.157 (0.146–0.174) | 0.109 | 3.64e-5 | 1.1e-6 |
+| 4,096 | STKFMM, order 10 | 0.209 (0.205–0.214) | 0.156 | 1.09e-6 | 4.3e-8 |
+| 4,096 | STKFMM, order 12 | 0.330 (0.327–0.347) | 0.252 | 3.93e-9 | 1.7e-10 |
+| 4,096 | STKFMM, order 14 | 0.516 (0.477–0.525) | 0.357 | 3.72e-10 | 1.5e-11 |
+| 32,768 | FMM3D, tol 1e-6 | 1.056 (1.054–1.060) | — | 1.22e-6 | 2.4e-8 |
+| 32,768 | FMM3D, tol 1e-8 | 2.164 (2.148–2.196) | — | 2.29e-9 | 6.4e-11 |
+| 32,768 | STKFMM, order 8 | 0.678 (0.671–0.686) | 0.601 | 3.17e-5 | 5.5e-7 |
+| 32,768 | STKFMM, order 10 | 0.932 (0.898–0.974) | 0.822 | 8.11e-7 | 3.2e-8 |
+| 32,768 | STKFMM, order 12 | 1.365 (1.349–1.370) | 1.251 | 1.46e-9 | 2.2e-11 |
+| 32,768 | STKFMM, order 14 | 1.912 (1.912–1.964) | 1.790 | 1.72e-10 | 3.1e-12 |
+| 131,072 | FMM3D, tol 1e-6 | 4.703 (4.669–4.790) | — | 4.90e-6 | 2.3e-8 |
+| 131,072 | FMM3D, tol 1e-8 | 8.812 (8.773–8.831) | — | 5.87e-9 | 3.3e-11 |
+| 131,072 | STKFMM, order 8 | 2.778 (2.700–2.862) | 2.482 | 5.57e-5 | 1.9e-7 |
+| 131,072 | STKFMM, order 10 | 3.626 (3.520–3.639) | 3.338 | 9.01e-7 | 5.0e-9 |
+| 131,072 | STKFMM, order 12 | 5.179 (5.138–5.181) | 4.842 | 2.92e-9 | 1.6e-11 |
+| 131,072 | STKFMM, order 14 | 8.341 (7.816–8.354) | 7.508 | 6.72e-10 | 3.6e-12 |
+
+"Relative error" is the global relative error over the sampled targets.
+"Normalized error" is the maximum constituent-normalized error.
+
+STKFMM multipole order is not a tolerance, so settings are paired by achieved
+accuracy:
+
+- **FMM3D at `tol=1e-6` versus STKFMM order 10.** Errors are about 1e-6 for
+  both; STKFMM's error is lower at 131,072 points (9.0e-7 versus 4.9e-6).
+- **FMM3D at `tol=1e-8` versus STKFMM order 12.** Errors are a few times
+  1e-9 for both. At 4,096 points STKFMM's error is slightly higher (3.9e-9
+  versus 2.3e-9); at the two larger sizes it is lower.
+
+STKFMM order 8 is the fastest setting, but its error of 3e-5 to 6e-5 does not
+reach FMM3D's `1e-6` accuracy.
+
+In the accuracy-matched pairs, FMM3D time divided by STKFMM time is:
+
+| Ns = Nt | 1e-6 pair: FMM3D / STKFMM order 10 | 1e-8 pair: FMM3D / STKFMM order 12 |
+|---:|---:|---:|
+| 4,096 | 0.86x (FMM3D faster) | 1.25x |
+| 32,768 | 1.13x | 1.59x |
+| 131,072 | 1.30x | 1.70x |
+
+**The speed difference comes from the free-space Stokeslet FMM.** The timings
+cover the complete wall evaluation in both codes. Both use image constructions
+with the same structure. Each runs a free-space Stokeslet FMM over the physical
+and reflected sources, and Laplace FMMs for the harmonic correction. STKFMM
+passes the lateral force components to its Stokeslet FMM and the vertical
+component to Laplace charges; it also uses one more Laplace evaluation than
+this package.
+
+Phase timings from the same run show where the time goes. At 131,072 points,
+FMM3D's free-space Stokes call alone takes **3.88 s** at `1e-6` and **7.28 s**
+at `1e-8`. These are longer than STKFMM's complete wall evaluations at the
+matched orders, **3.63 s** and **5.18 s**. FMM3D's Laplace wall correction
+adds only 0.78 s and 1.50 s. Even without that correction, FMM3D would remain
+slower. The measured differences therefore reflect STKFMM's PVFMM-based
+kernel-independent FMM against FMM3D's free-space Stokeslet FMM, together with
+their leaf-size settings and builds, rather than the wall treatment.
+
+A standalone free-space Stokeslet comparison on the identical source set was
+started on 2026-11-19, but another process loaded the machine during it.
+Its absolute times were about 1.6x slower than this run, so they are not
+reported.
+
+STKFMM's advantage grows with problem size and requested accuracy. At 131,072
+points and `tol=1e-8`, FMM3D's Stokes call takes **7.28 s** of the 8.81 s
+total; the Laplace correction takes 1.50 s, and the proximity guard 0.026 s.
+Reusing STKFMM's trees for new forces saves 7–11% at 131,072 points, so tree
+construction is not the main part of STKFMM's cost.
+
+### Validation before timing
+
+Before timing, the worker checks STKFMM at every order on three small
+fixtures:
+
+- **wall:** 23 sources and 21 targets.
+- **tree:** 2,048 sources and 61 targets, large enough to use far-field
+  expansions.
+- **shifted_wall:** wall height 1.3, viscosity 1.7 and source heights
+  0.01–0.02 above the wall.
+
+Each fixture places three targets exactly on the wall. On the two small
+fixtures, all sources are close enough to the targets that STKFMM sums every
+pair directly, and errors are at rounding level (below 1e-14). On the tree
+fixture, the relative error is 1.8e-5 at order 8 and 2.1e-9 at order 12. The
+largest computed velocity magnitudes at the on-wall targets are 8.5e-5 at
+order 8 and 1.5e-8 at order 12. They are reported as computed, without
+zeroing.
+
+### Caveats
+
+- STKFMM's leaf size was tuned and FMM3D's was not. A sweep at N = 32,768 with
+  eight threads chose `max_pts=500`. At order 8 this was 2.3x faster than
+  `max_pts=2000`, and at order 12 it was 1.2x faster; 250 and 1000 were also
+  slower. Leaf size also changes accuracy: larger leaves sum more pairs
+  directly. FMM3D ran with its built-in defaults through `fmm3dpy`.
+- The two codes use different compilers and numerical libraries; see
+  provenance below.
+- Only one geometry was measured: a flat cloud with lateral span 1 and heights
+  up to 1.1. STKFMM's half-cube box makes its octree depend on the ratio of
+  height to lateral span, so other geometries may scale differently.
+- One million points were not attempted.
+
+### Provenance and reproduction
+
+Hardware was an AMD Ryzen 7 PRO 8840HS (8 cores, 16 hardware threads, 27 GiB
+RAM).
+
+- **FMM3D side:** the RigidMultiblobsWall experiment interpreter, with Python
+  3.10.12, NumPy 2.2.6, Numba 0.65.1 and FMM3D 2.1.0 OpenMP bindings. Both
+  loaded Stokes and Laplace extensions report `omp_get_max_threads()==8`. This
+  repository was at commit `0eb58ec`; the fixture came from RigidMultiblobsWall
+  `faster_mobility` at commit `8d41e46`.
+- **STKFMM side:** STKFMM's local conda build, with Python 3.11.18, NumPy
+  2.4.6, mpi4py 4.1.2, Open MPI 5.0.11, FFTW 3.3.11 and OpenBLAS, built with
+  GCC 13 in Release mode. PVFMM was revision `b9de1ad` with
+  `PVFMM_EXTENDED_BC=ON`. The STKFMM-linked `libgomp` reports eight threads.
+
+`OMP_DYNAMIC=FALSE` and single-threaded BLAS are set for both interpreters.
+The fixture and seeds (1927, 1928, 1929) match the
+[optimized Numba comparison](#optimized-direct-numba-rerun-2026-11-18): lateral
+coordinates in the unit square, source heights `[0.2,0.4]`, target heights
+`[0.1,1.1]`, wall height 0 and viscosity 1.
+
+Reproduce from this repository root:
+
+```bash
+../RigidMultiblobsWall/faster_mobility/.venv-blakeComparison/bin/python \
+    benchmarks/compare_stkfmm_wall.py --threads 8 --sizes 4096 32768 131072 \
+    --tolerances 1e-6 1e-8 --orders 8 10 12 14 --max-pts 500 --repeats 3 \
+    --output results/stkfmm_wall_20261119
+```
+
+`--stkfmm-root` (default `../STKFMM`) must contain the local build described
+in `STKFMM/Python/README.md`. `--rigid-root` selects the RigidMultiblobsWall
+checkout. Raw [JSON](../results/stkfmm_wall_20261119/comparison.json) and
+[CSV](../results/stkfmm_wall_20261119/comparison.csv) files, with all samples,
+phase times, validation records and both interpreters' provenance, are saved
+under the git-ignored `results/` directory.
+
 ## Performance compared with direct Numba evaluation
 
 ### One million sources and targets (2026-11-18)

@@ -1,6 +1,7 @@
-# Python Blake velocity
+# Python Blake velocity and fields
 
-The Python implementation evaluates velocity above a horizontal no-slip wall.
+The Python implementation evaluates velocity, pressure, velocity gradients and
+traction above a horizontal no-slip wall.
 The accelerated representation is due to **Z. Gimbutas, L. Greengard and
 S. Veerapaneni**, *Simple and efficient representations for the fundamental
 solutions of Stokes flow in a half-space*, JFM 776 (2015), R1,
@@ -54,7 +55,9 @@ Defaults are `method="fmm"`, `mu=1`, `wall_height=0`, `tol=1e-9`,
 `block_size=(256, 512)`, `correct_near_wall=False`, `near_wall_distance=None`,
 `diagnostics=False`, `return_info=False`.
 Block sizes are target/source counts for direct work and diagnostics.
-The Python interface currently supports velocity only.
+Pressure, velocity gradients and traction are available through
+[`blake.fields`](#pressure-velocity-gradients-and-traction). Rotlets, potential
+dipoles and stresslets remain MATLAB-only.
 
 ## Parallel proximity guard
 
@@ -146,6 +149,68 @@ build. No Hessian is requested through the Python interface. Prepared geometry
 reuses translation and reflection, but the proximity guard runs on each FMM
 application, and neither FMM trees nor expansions are reused.
 
+## Pressure, velocity gradients and traction
+
+```python
+out, info = blake.fields(sources, forces, targets,
+                         requested=("pressure", "gradient", "traction"),
+                         normals=normals, mu=1.5, tol=1e-9, return_info=True)
+geom = blake.prepare(sources, targets)            # or reuse prepared geometry
+out = blake.apply_fields(geom, forces, requested="pressure")
+```
+
+`requested` contains one or more of `velocity`, `pressure`, `gradient` and
+`traction`. A single name may be passed as a string. The result is a dict that
+always contains `velocity` with shape `(3, Nt)`. It also contains:
+
+- **`pressure`**, with shape `(Nt,)`, when pressure is requested. Pressure is
+  independent of `mu` for fixed forces, and is not divided by viscosity.
+- **`grad_u`**, with shape `(3, 3, Nt)` and `grad_u[i, j, m] = du_i/dx_j` at
+  target `m`, when gradients are requested. The velocity component comes
+  first and the derivative direction second, as in MATLAB.
+- **`traction`**, with shape `(3, Nt)`, when traction is requested. It equals
+  `(-p I + mu (grad_u + grad_u^T)) n`. `normals` must have shape `(3, Nt)` and
+  unit length to within `1e-12`. Passing `normals` without requesting traction
+  is an error.
+
+Traction also returns `pressure` and `grad_u`. MATLAB returns pressure as
+`1 x Nt`; Python returns a one-dimensional array.
+
+`method`, `mu`, `tol`, `block_size`, `correct_near_wall`, `near_wall_distance`,
+`diagnostics` and `return_info` behave as in `blake.apply`. `blake.apply` and
+`blake.velocity` share the same evaluator with velocity only.
+
+**FMM.** The same two FMM3D calls are used; only their target flags change:
+
+| Requested | `stfmm3d` `ifppregtarg` | `lfmm3d` `pgt` |
+|---|:-:|:-:|
+| Velocity | 1 | 2 |
+| Pressure | 2 | 2 |
+| Gradient or traction | 3 | 3 (adds Hessians) |
+
+The flags appear as `info["stokes_target_flag"]` and
+`info["laplace_target_flag"]`. Assembly follows the
+[field formulas](formulas.md):
+
+- `p = p_S - 2*dphi/dz`
+- `du_i/dx_j = [dv_i/dx_j - delta_j3 g_i - z H_ij + delta_i3 g_j]/mu`, where
+  `g` is the harmonic gradient and `H` its Hessian.
+
+`fmm3dpy` returns Stokes `gradtarg[k, i, m] = dv_i/dx_k`, and the adapter
+transposes it explicitly. Laplace Hessians are unpacked from the order
+`xx yy zz xy xz yz`.
+
+**Direct.** `blake.direct_fields` contracts Blake's explicit analytic pressure
+and target derivatives (`P_j`, `G_ijk` in the [formulas](formulas.md)) in
+bounded blocks. It uses no image representation, finite differences or pair
+storage. `blake.blake_pair(..., derivatives=True)` returns the readable pair
+reference `(B, P, G)` with `G[i, j, k] = dB[i, j]/dx_k`.
+
+**Near-wall correction.** Selected targets receive the complete direct
+velocity, pressure and gradient from direct summation, and traction is
+assembled from those fields. Computed wall values are never overwritten.
+Diagnostics (`constituent_scale`) remain velocity-only.
+
 ## Direct reference and exceptional cases
 
 The [pair tensor](../python/blake/direct.py) computes explicit Blake tensor
@@ -218,8 +283,8 @@ Blocked pair arrays have axes `(component, target, source)`.
 | Module | Purpose |
 |---|---|
 | [geometry.py](../python/blake/geometry.py) | Coordinate checks, reflection and the FMM proximity guard |
-| [fmm.py](../python/blake/fmm.py) | Strength packing, the two FMM calls and physical velocity assembly |
+| [fmm.py](../python/blake/fmm.py) | Strength packing, the two FMM calls and physical field assembly |
 | [near_wall.py](../python/blake/near_wall.py) | Optional close-target selection and geometry subsets |
-| [direct.py](../python/blake/direct.py) | Independent Blake pair tensor and blocked force contraction |
+| [direct.py](../python/blake/direct.py) | Independent Blake pair tensor, analytic derivatives and blocked contractions |
 | [diagnostics.py](../python/blake/diagnostics.py) | Constituent magnitudes and error metrics |
 | [validation.py](../python/blake/validation.py) | Separate wrapper, field and reciprocity checks |

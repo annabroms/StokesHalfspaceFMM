@@ -11,6 +11,45 @@ An independent direct reference implements J. R. Blake's original tensor,
 [equation (16), 1971](https://doi.org/10.1017/S0305004100049902).
 Both interfaces use component-first `3 x N` arrays and return physical velocity.
 
+## What is supported, compared with STKFMM
+
+All rows are quantities above a no-slip wall. "Direct" means blocked O(Ns*Nt)
+summation. The STKFMM column covers its wall class `StkWallFMM`.
+
+| Quantity above the wall | MATLAB FMM | MATLAB direct | Python FMM | Python direct | STKFMM `StkWallFMM` |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Stokeslet (point-force) velocity | Yes | Yes | Yes | Yes | Yes (`Stokes`) |
+| Pressure | Yes¹ | Yes | Yes | Yes | — |
+| Velocity gradient and traction | Yes² | Yes | Yes | Yes | — |
+| Rotlet, potential-dipole and oriented-stresslet velocity | — | Yes | — | — | — |
+| RPY velocity for finite-radius blobs, plus its Laplacian | — | — | — | — | Yes (`RPY`) |
+| Periodic in x or in x and y | — | — | — | — | Yes³ |
+
+¹ Both the default two-call backend and `fmm_backend='one-call'`.
+² Two-call backend only.
+³ STKFMM lists `PX` and `PXY` support for both wall kernels. These modes need
+STKFMM's precomputed periodic data and were not tested here.
+
+STKFMM's free-space class `Stk3DFMM` has more kernels, such as pressure,
+velocity gradients, traction and double layers. These have **no wall
+correction** and are not equivalents of the rows above.
+
+Other differences:
+
+- **Only shared quantity.** Point-force velocity is the only quantity both
+  libraries compute, so the
+  [timing comparison](#fmm3d-versus-stkfmm-with-a-wall) measures only that.
+- **Coincident points.** This package raises an error when a source and a
+  target coincide.
+- **Viscosity.** STKFMM sets viscosity to one, so its output must be divided by
+  `mu`. This package takes `mu` as an input and returns physical velocity.
+- **Wall position.** STKFMM places the wall at the lower face of its cubic box,
+  and all points must lie in the lower half of that box. This package takes a
+  `wall_height` option and builds trees from the points themselves.
+- **Parallelism and reuse.** STKFMM can run across several processes with
+  MPI, and can reuse a tree for new strengths. This package uses OpenMP in a
+  single process through FMM3D, and rebuilds its trees on every call.
+
 ## Shared FMM3D dependency
 
 Both language wrappers use the same underlying **FMM3D Fortran implementation**.
@@ -90,14 +129,25 @@ Laplace potentials. [Options and output conventions](docs/matlab.md).
 
 ## Kernels and fields
 
-Both languages evaluate wall Stokeslet velocity. MATLAB additionally provides:
+Both languages evaluate wall Stokeslet velocity, pressure, velocity gradients
+and complete traction through `blake.fields`. These are available by FMM or
+by direct summation, as in this Python example:
 
-- Pressure, velocity gradients and complete traction through `blake.fields`.
-- Wall **rotlets**, **potential dipoles** and **stresslets** through
-  `blake.rotlet`, `blake.potential_dipole` and `blake.stresslet`, using blocked
-  direct evaluation.
+```python
+out = blake.fields(sources, forces, targets, requested=("pressure", "traction"),
+                   normals=normals, mu=1.5)
+# out["velocity"]: (3, Nt); out["pressure"]: (Nt,), not divided by mu
+# out["grad_u"][i, j, m] = du_i/dx_j; out["traction"]: (3, Nt)
+```
 
-See [MATLAB fields](docs/matlab.md#pressure-gradients-and-traction) and
+Gradient and traction requests take the same two FMM calls as velocity, with
+higher target output flags. MATLAB returns pressure as `1 x Nt`. MATLAB
+additionally provides wall **rotlets**, **potential dipoles** and
+**stresslets** through `blake.rotlet`, `blake.potential_dipole` and
+`blake.stresslet`, using blocked direct evaluation.
+
+See [MATLAB fields](docs/matlab.md#pressure-gradients-and-traction),
+[Python fields](docs/python.md#pressure-velocity-gradients-and-traction) and
 [other kernel definitions and tests](docs/singularities.md).
 Published no-slip wall derivations for these other singularities are listed in
 the [singularity references](docs/singularities.md#checked-references), including
@@ -192,6 +242,60 @@ MATLAB regression suite passed; the million-point FMM case remains incomplete.
 See [methods, accuracy and provenance](docs/benchmarks.md#performance-compared-with-direct-numba-evaluation),
 [guard dependency and thread controls](docs/python.md#parallel-proximity-guard),
 and [OpenMP build/verification instructions](docs/dependencies.md#python-bindings-with-openmp).
+
+### FMM3D versus STKFMM with a wall
+
+[STKFMM](https://github.com/wenyan4work/STKFMM)'s `StkWallFMM` class (on its
+`master` branch) evaluates the same wall Stokeslet velocity with PVFMM. It runs
+a Stokeslet FMM over physical and reflected sources plus two Laplace FMMs;
+this repository's default path makes two FMM3D calls. STKFMM requires the wall
+to be the lower face of its cubic box, with every point in the box's lower
+half. Its output excludes viscosity.
+[How it is called](docs/benchmarks.md#how-stkfmms-wall-kernel-is-called).
+
+The comparison used the fixture and CPU of the Numba study above, with
+**eight verified OpenMP threads for both codes**, on 2026-11-19. Times are
+medians in seconds of three complete evaluations, each rebuilding all trees.
+STKFMM order is not a tolerance, so each FMM3D tolerance is paired with the
+STKFMM order of similar measured accuracy:
+
+| Ns = Nt | FMM3D, tol 1e-6 | STKFMM, order 10 | FMM3D / STKFMM | FMM3D, tol 1e-8 | STKFMM, order 12 | FMM3D / STKFMM |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4,096 | 0.178 | 0.209 | 0.86x | 0.413 | 0.330 | 1.25x |
+| 32,768 | 1.056 | 0.932 | **1.13x** | 2.164 | 1.365 | **1.59x** |
+| 131,072 | 4.703 | 3.626 | **1.30x** | 8.812 | 5.179 | **1.70x** |
+
+Ratios above one mean STKFMM is faster. STKFMM is faster in every case except
+N = 4,096 at `1e-6`, and its advantage grows with problem size and accuracy.
+
+**Where the difference comes from.** These times cover the complete wall
+evaluation, including each code's wall correction. Both codes build the wall
+the same way: a free-space Stokeslet FMM over the physical and reflected
+sources, plus Laplace FMMs for the harmonic correction. STKFMM splits the
+force components slightly differently and uses one more Laplace evaluation.
+
+Phase timings show that the speed difference comes from the free-space
+Stokeslet FMM, not the wall correction. At 131,072 points, FMM3D's
+free-space Stokes call alone (3.88 s at `1e-6`, 7.28 s at `1e-8`) takes
+longer than STKFMM's entire wall evaluation (3.63 s and 5.18 s). FMM3D's
+Laplace wall correction adds only 0.78–1.50 s. The comparison is therefore
+mainly between STKFMM's PVFMM-based free-space FMM and FMM3D, including their
+leaf sizes and builds.
+
+Errors are against the independent direct Blake sum at 256 targets. At
+131,072 points, the relative error is **4.90e-6** for FMM3D at `1e-6` versus
+**9.01e-7** for STKFMM at order 10, and **5.87e-9** for FMM3D at `1e-8` versus
+**2.92e-9** for STKFMM at order 12. STKFMM order 8 is faster still (2.78 s)
+but only reaches an error of about 5e-5.
+
+Most of FMM3D's time is its Stokes call: 7.28 s of 8.81 s at 131,072 points
+and `1e-8`. STKFMM's timings exclude its one-time operator loading (0.6–5 s
+per order) and use a tuned leaf size of `max_pts=500`; FMM3D ran with its
+defaults. Reusing STKFMM's trees for new forces saves only 7–11%. Only one
+geometry was measured, and other geometries may scale differently.
+
+See [all orders, validation, caveats and provenance](docs/benchmarks.md#performance-compared-with-stkfmms-wall-fmm-2026-11-19)
+and the [driver](benchmarks/compare_stkfmm_wall.py).
 
 ## Detailed documentation
 

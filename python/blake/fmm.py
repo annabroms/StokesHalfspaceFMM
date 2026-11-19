@@ -1,4 +1,8 @@
-"""Two target-only FMM3D calls using Gimbutas–Greengard–Veerapaneni (2015)."""
+"""Two target-only FMM3D calls using Gimbutas–Greengard–Veerapaneni (2015).
+
+Velocity, pressure and velocity gradients share the same two calls; only the
+requested target flags change.
+"""
 
 from time import perf_counter
 
@@ -23,6 +27,10 @@ def _checked_output(out, name, shape, backend):
     return array.reshape(shape)
 
 
+# FMM3D packs symmetric Laplace Hessians as xx yy zz xy xz yz.
+_HESSIAN_INDEX = np.array([[0, 3, 4], [3, 1, 5], [4, 5, 2]])
+
+
 def fmm_velocity(geom=None, forces=None, *, mu=1.0, tol=1e-9):
     """Evaluate physical velocity with one Stokes call and one Laplace call."""
     if geom is None and forces is None:
@@ -36,8 +44,31 @@ def fmm_velocity(geom=None, forces=None, *, mu=1.0, tol=1e-9):
         assert info["fmm_call_count"] == 2
         return None
 
+    fields, timing = fmm_fields(geom, forces, order=1, mu=mu, tol=tol)
+    return fields["velocity"], timing
+
+
+def fmm_fields(geom=None, forces=None, *, order=1, mu=1.0, tol=1e-9):
+    """Evaluate velocity, pressure (order>=2) and grad_u (order 3) with two FMM calls.
+
+    grad_u[i, j, m] = du_i/dx_j at target m; pressure is not divided by mu.
+    """
+    if geom is None and forces is None:
+        from .direct import direct_fields
+
+        geometry = prepare([[0, 0.4], [0, 0.1], [1, 0.3]], [[0.2, 0.3], [0.4, 0.1], [0, 2]])
+        forces = np.array([[1, -1], [2, 0.5], [3, 2]])
+        value, info = fmm_fields(geometry, forces, order=3, mu=1.7, tol=1e-12)
+        reference = direct_fields(geometry, forces, mu=1.7)
+        for name in ("velocity", "pressure", "grad_u"):
+            np.testing.assert_allclose(value[name], reference[name], atol=1e-11)
+        assert info["fmm_call_count"] == 2 and info["laplace_target_flag"] == 3
+        return None
+
     if not isinstance(geom, Geometry):
         raise ValueError("Use geometry returned by prepare()")
+    if order not in (1, 2, 3):
+        raise ValueError("order must be 1 (velocity), 2 (pressure) or 3 (gradient)")
     forces = _as_vector_array(forces, "forces")
     if forces.shape != geom.sources.shape:
         raise ValueError("forces must have the same shape as sources")
@@ -55,10 +86,12 @@ def fmm_velocity(geom=None, forces=None, *, mu=1.0, tol=1e-9):
         "assembly_seconds": 0.0,
         "fmm_call_count": 0,
         "tree_reused": False,
+        "stokes_target_flag": 0,
+        "laplace_target_flag": 0,
     }
     target_count = geom.targets.shape[1]
     if not geom.sources.shape[1] or not target_count:
-        return np.zeros((3, target_count)), timing
+        return _zero_fields(order, target_count), timing
 
     timer = perf_counter()
     guard(geom)
@@ -85,7 +118,8 @@ def fmm_velocity(geom=None, forces=None, *, mu=1.0, tol=1e-9):
     harmonic_dipoles = np.asfortranarray(reflected_forces * geom.sources[2])
     timing["strength_seconds"] = perf_counter() - timer
 
-    # Call 1: physical and image Stokeslets, requesting target velocity only.
+    # Call 1: physical and image Stokeslets. Target flag 1 gives velocity,
+    # 2 adds pressure and 3 adds the velocity gradient.
     timer = perf_counter()
     stokes = fmm3dpy.stfmm3d(
         eps=tol,
@@ -93,13 +127,16 @@ def fmm_velocity(geom=None, forces=None, *, mu=1.0, tol=1e-9):
         stoklet=stokes_strengths,
         targets=geom.targets,
         ifppreg=0,
-        ifppregtarg=1,
+        ifppregtarg=order,
         nd=1,
     )
     timing["stokes_seconds"] = perf_counter() - timer
+    timing["stokes_target_flag"] = order
     stokes_velocity = _checked_output(stokes, "pottarg", (3, target_count), "stfmm3d")
 
-    # Call 2: image charges and dipoles, requesting phi and its target gradient.
+    # Call 2: image charges and dipoles. Velocity and pressure need phi and its
+    # gradient (flag 2); velocity gradients also need its Hessian (flag 3).
+    laplace_flag = max(2, order)
     timer = perf_counter()
     harmonic = fmm3dpy.lfmm3d(
         eps=tol,
@@ -108,10 +145,11 @@ def fmm_velocity(geom=None, forces=None, *, mu=1.0, tol=1e-9):
         dipvec=harmonic_dipoles,
         targets=geom.targets,
         pg=0,
-        pgt=2,
+        pgt=laplace_flag,
         nd=1,
     )
     timing["laplace_seconds"] = perf_counter() - timer
+    timing["laplace_target_flag"] = laplace_flag
 
     timer = perf_counter()
     potential = _checked_output(harmonic, "pottarg", (target_count,), "lfmm3d")
@@ -123,8 +161,35 @@ def fmm_velocity(geom=None, forces=None, *, mu=1.0, tol=1e-9):
     velocity = stokes_velocity - target_heights * gradient
     velocity[2] += potential
     velocity /= mu
-    if not np.isfinite(velocity).all():
-        raise FloatingPointError("FMM velocity overflowed; rescale inputs")
+    fields = {"velocity": velocity}
+    if order >= 2:
+        # GGV (3), (17): the subtracted Papkovich-Neuber field carries pressure 2*dphi/dz.
+        stokes_pressure = _checked_output(stokes, "pretarg", (target_count,), "stfmm3d")
+        fields["pressure"] = stokes_pressure - 2 * gradient[2]
+    if order >= 3:
+        # fmm3dpy returns gradtarg[k, i, m] = dv_i/dx_k; transpose to [i, k, m].
+        stokes_gradient = _checked_output(
+            stokes, "gradtarg", (3, 3, target_count), "stfmm3d"
+        ).transpose(1, 0, 2)
+        packed = _checked_output(harmonic, "hesstarg", (6, target_count), "lfmm3d")
+        hessian = packed[_HESSIAN_INDEX]
+        # du_i/dx_j = [dv_i/dx_j - delta_j3*g_i - z*H_ij + delta_i3*g_j] / mu.
+        grad_u = stokes_gradient - target_heights * hessian
+        grad_u[:, 2, :] -= gradient
+        grad_u[2, :, :] += gradient
+        fields["grad_u"] = grad_u / mu
+    if not all(np.isfinite(value).all() for value in fields.values()):
+        raise FloatingPointError("FMM fields overflowed; rescale inputs")
     timing["assembly_seconds"] = perf_counter() - timer
     timing["fmm_call_count"] = 2
-    return velocity, timing
+    return fields, timing
+
+
+def _zero_fields(order, target_count):
+    """Return correctly shaped zero fields for empty source or target sets."""
+    fields = {"velocity": np.zeros((3, target_count))}
+    if order >= 2:
+        fields["pressure"] = np.zeros(target_count)
+    if order >= 3:
+        fields["grad_u"] = np.zeros((3, 3, target_count))
+    return fields
